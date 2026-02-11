@@ -1,0 +1,1062 @@
+﻿import { useState, useEffect, useRef } from 'react';
+import { MessageCircle, X, Send, HelpCircle, Book, Clock, Target, BarChart3, Calendar, Flame, Calculator, Atom, Globe, Beaker, Code, PenTool, Languages, Music, Bot, Lightbulb, Search, Zap, CheckCircle, ArrowRight } from 'lucide-react';
+
+interface DoubtSolverProps {
+  isDarkMode: boolean;
+}
+
+interface FAQ {
+  id: string;
+  question: string;
+  answer: string;
+  category: 'timer' | 'subjects' | 'goals' | 'analytics' | 'streaks' | 'general' | 'math' | 'physics' | 'chemistry' | 'biology' | 'programming' | 'english' | 'history';
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+}
+
+interface SubjectProblem {
+  id: string;
+  subject: string;
+  question: string;
+  solution: string;
+  steps: string[];
+  difficulty: 'easy' | 'medium' | 'hard';
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+}
+
+interface ChatMessage {
+  id: string;
+  type: 'user' | 'bot';
+  content: string;
+  timestamp: Date;
+  isTyping?: boolean;
+}
+
+interface ProblemSolver {
+  subject: string;
+  patterns: RegExp[];
+  solver: (input: string) => string;
+}
+
+const faqs: FAQ[] = [
+  // App Usage FAQs
+  {
+    id: 'how-to-start-timer',
+    question: 'How do I start a study timer?',
+    answer: 'Go to the Study Timer section, select a subject, set your desired duration, and click "Start Timer". You can pause, resume, or stop the timer at any time.',
+    category: 'timer',
+    icon: Clock
+  },
+  {
+    id: 'add-subjects',
+    question: 'How do I add new subjects?',
+    answer: 'Navigate to Subject Manager, click "Add Subject", enter the subject name, choose a color, set difficulty level and priority, then set your target study hours.',
+    category: 'subjects',
+    icon: Book
+  },
+  {
+    id: 'create-goals',
+    question: 'How do I create study goals?',
+    answer: 'Go to Goals Manager, click "Add Goal", fill in the title, description, select subjects, set target date, and choose if it\'s an exam goal with specific details.',
+    category: 'goals',
+    icon: Target
+  },
+  {
+    id: 'understand-analytics',
+    question: 'What do the analytics show?',
+    answer: 'Analytics show your completion rate (target vs actual hours), weighted focus ratings, study time distribution by subject, and progress trends over 7 and 30 days.',
+    category: 'analytics',
+    icon: BarChart3
+  },
+  {
+    id: 'maintain-streaks',
+    question: 'How do study streaks work?',
+    answer: 'Study streaks count consecutive days you\'ve completed study sessions. Study any amount on a day to maintain your streak. Missing 2+ days will break the streak.',
+    category: 'streaks',
+    icon: Flame
+  },
+  {
+    id: 'data-sync',
+    question: 'Will my data sync across devices?',
+    answer: 'Yes! When signed in, your data syncs across all devices via cloud storage. Data also persists locally even when signed out.',
+    category: 'general',
+    icon: HelpCircle
+  },
+  {
+    id: 'focus-rating',
+    question: 'What is focus rating?',
+    answer: 'Focus rating is a 1-5 scale you set after each study session to rate how focused you were. This helps track your concentration patterns over time.',
+    category: 'timer',
+    icon: Clock
+  },
+  {
+    id: 'schedule-study',
+    question: 'How do I schedule study sessions?',
+    answer: 'Use the Study Calendar to plan future study sessions. Click on a date and time slot, select a subject, and set the duration to create scheduled study blocks.',
+    category: 'general',
+    icon: Calendar
+  },
+
+  // Math Problems & Solutions
+  {
+    id: 'quadratic-formula',
+    question: 'How to solve quadratic equations using the quadratic formula?',
+    answer: 'For ax² + bx + c = 0, use x = (-b ± √(b² - 4ac)) / 2a. Example: x² - 5x + 6 = 0 → a=1, b=-5, c=6 → x = (5 ± √(25-24))/2 = (5 ± 1)/2 → x = 3 or x = 2',
+    category: 'math',
+    icon: Calculator
+  },
+  {
+    id: 'derivatives-basics',
+    question: 'What are the basic derivative rules?',
+    answer: 'Power rule: d/dx(xⁿ) = nxⁿ⁻¹. Product rule: d/dx(uv) = u\'v + uv\'. Chain rule: d/dx(f(g(x))) = f\'(g(x)) × g\'(x). Example: d/dx(x³) = 3x², d/dx(sin(2x)) = 2cos(2x)',
+    category: 'math',
+    icon: Calculator
+  },
+  {
+    id: 'integration-techniques',
+    question: 'How to solve basic integrals?',
+    answer: 'Power rule: ∫xⁿdx = xⁿ⁺¹/(n+1) + C. Substitution: ∫f(g(x))g\'(x)dx = ∫f(u)du where u = g(x). Example: ∫x²dx = x³/3 + C, ∫2x(x²+1)dx = (x²+1)² + C',
+    category: 'math',
+    icon: Calculator
+  },
+
+  // Physics Problems & Solutions
+  {
+    id: 'kinematics-equations',
+    question: 'What are the kinematic equations for motion?',
+    answer: 'v = u + at, s = ut + ½at², v² = u² + 2as, s = (u+v)t/2. Where u=initial velocity, v=final velocity, a=acceleration, t=time, s=displacement. Example: Car accelerates at 2m/s² for 5s from rest → v = 0 + 2×5 = 10m/s',
+    category: 'physics',
+    icon: Atom
+  },
+  {
+    id: 'newtons-laws',
+    question: 'How to apply Newton\'s laws of motion?',
+    answer: '1st Law: Object at rest stays at rest unless acted upon by force. 2nd Law: F = ma. 3rd Law: Every action has equal opposite reaction. Example: 10kg box pushed with 50N force → a = F/m = 50/10 = 5m/s²',
+    category: 'physics',
+    icon: Atom
+  },
+  {
+    id: 'ohms-law',
+    question: 'How to use Ohm\'s Law in circuits?',
+    answer: 'V = IR (Voltage = Current × Resistance). Power: P = VI = I²R = V²/R. Example: 12V battery with 4Ω resistor → I = V/R = 12/4 = 3A, P = VI = 12×3 = 36W',
+    category: 'physics',
+    icon: Atom
+  },
+
+  // Chemistry Problems & Solutions
+  {
+    id: 'balancing-equations',
+    question: 'How to balance chemical equations?',
+    answer: 'Count atoms of each element on both sides and adjust coefficients. Example: H₂ + O₂ → H₂O becomes 2H₂ + O₂ → 2H₂O (4H and 2O on each side). Start with most complex molecule first.',
+    category: 'chemistry',
+    icon: Beaker
+  },
+  {
+    id: 'molarity-calculations',
+    question: 'How to calculate molarity and moles?',
+    answer: 'Molarity (M) = moles/volume(L). Moles = mass/molar mass. Example: 58.5g NaCl in 2L solution → moles = 58.5/58.5 = 1 mol → M = 1/2 = 0.5M',
+    category: 'chemistry',
+    icon: Beaker
+  },
+  {
+    id: 'gas-laws',
+    question: 'How to use ideal gas law PV = nRT?',
+    answer: 'P = pressure, V = volume, n = moles, R = 0.0821 L·atm/mol·K, T = temperature(K). Example: 2 moles gas at 300K, 1atm → V = nRT/P = 2×0.0821×300/1 = 49.26L',
+    category: 'chemistry',
+    icon: Beaker
+  },
+
+  // Programming Problems & Solutions
+  {
+    id: 'loops-arrays',
+    question: 'How to iterate through arrays in programming?',
+    answer: 'For loop: for(int i=0; i<array.length; i++) { process(array[i]); }. Enhanced for: for(item : array) { process(item); }. While loop: int i=0; while(i<array.length) { process(array[i++]); }',
+    category: 'programming',
+    icon: Code
+  },
+  {
+    id: 'recursion-basics',
+    question: 'How does recursion work?',
+    answer: 'Function calls itself with simpler input until base case. Example: factorial(n) = n × factorial(n-1), base case factorial(0)=1. factorial(3) = 3×factorial(2) = 3×2×factorial(1) = 3×2×1×factorial(0) = 6',
+    category: 'programming',
+    icon: Code
+  },
+  {
+    id: 'sorting-algorithms',
+    question: 'What are basic sorting algorithms?',
+    answer: 'Bubble Sort: Compare adjacent elements, swap if wrong order. Selection Sort: Find minimum, swap with first. Insertion Sort: Insert each element in correct position. Quick Sort: Divide and conquer with pivot.',
+    category: 'programming',
+    icon: Code
+  },
+
+  // English & Literature
+  {
+    id: 'essay-structure',
+    question: 'How to structure an essay?',
+    answer: 'Introduction (hook, background, thesis), Body paragraphs (topic sentence, evidence, analysis, transition), Conclusion (restate thesis, summarize points, call to action). Each paragraph should have one main idea.',
+    category: 'english',
+    icon: PenTool
+  },
+  {
+    id: 'grammar-rules',
+    question: 'What are common grammar rules?',
+    answer: 'Subject-verb agreement: Singular subjects take singular verbs. Comma usage: Before coordinating conjunctions in compound sentences. Apostrophes: Possession (John\'s book) and contractions (don\'t). Their/there/they\'re distinctions.',
+    category: 'english',
+    icon: Languages
+  },
+
+  // Biology Problems & Solutions
+  {
+    id: 'cell-structure',
+    question: 'What are the main parts of a cell?',
+    answer: 'Nucleus (control center), Mitochondria (powerhouse), Ribosomes (protein synthesis), ER (transport), Golgi apparatus (packaging), Cell membrane (barrier), Cytoplasm (gel-like substance). Plant cells also have cell wall, chloroplasts, and vacuoles.',
+    category: 'biology',
+    icon: Globe
+  },
+  {
+    id: 'photosynthesis',
+    question: 'How does photosynthesis work?',
+    answer: '6CO₂ + 6H₂O + light energy → C₆H₁₂O₆ + 6O₂. Light reactions occur in thylakoids (produce ATP, NADPH), Calvin cycle occurs in stroma (fixes CO₂ into glucose). Chlorophyll absorbs light energy.',
+    category: 'biology',
+    icon: Globe
+  },
+
+  // History Problems & Solutions
+  {
+    id: 'historical-analysis',
+    question: 'How to analyze historical events?',
+    answer: 'Use OPCVL method: Origin (who wrote it?), Purpose (why?), Content (what does it say?), Values (what\'s useful?), Limitations (what\'s missing?). Consider context, cause and effect, continuity and change.',
+    category: 'history',
+    icon: Book
+  },
+  {
+    id: 'essay-writing-history',
+    question: 'How to write a history essay?',
+    answer: 'Thesis statement with clear argument, chronological or thematic structure, use primary/secondary sources, analyze rather than just describe, consider multiple perspectives, conclude with significance of findings.',
+    category: 'history',
+    icon: Book
+  }
+];
+
+const categories = [
+  { id: 'all', name: 'All Topics', icon: HelpCircle },
+  // App Usage Categories
+  { id: 'timer', name: 'Study Timer', icon: Clock },
+  { id: 'subjects', name: 'Subjects', icon: Book },
+  { id: 'goals', name: 'Goals', icon: Target },
+  { id: 'analytics', name: 'Analytics', icon: BarChart3 },
+  { id: 'streaks', name: 'Streaks', icon: Flame },
+  { id: 'general', name: 'General', icon: Calendar },
+  // Academic Subject Categories
+  { id: 'math', name: 'Mathematics', icon: Calculator },
+  { id: 'physics', name: 'Physics', icon: Atom },
+  { id: 'chemistry', name: 'Chemistry', icon: Beaker },
+  { id: 'biology', name: 'Biology', icon: Globe },
+  { id: 'programming', name: 'Programming', icon: Code },
+  { id: 'english', name: 'English', icon: PenTool },
+  { id: 'history', name: 'History', icon: Book }
+];
+
+// AI Problem Solvers for different subjects
+const problemSolvers: ProblemSolver[] = [
+  {
+    subject: 'math',
+    patterns: [
+      /solve\s+(.+?)\s*=\s*0/i,
+      /derivative\s+of\s+(.+)/i,
+      /integrate\s+(.+)/i,
+      /factor\s+(.+)/i,
+      /simplify\s+(.+)/i,
+      /(\d+)\s*\+\s*(\d+)/,
+      /(\d+)\s*-\s*(\d+)/,
+      /(\d+)\s*\*\s*(\d+)/,
+      /(\d+)\s*\/\s*(\d+)/
+    ],
+    solver: (input: string) => {
+      // Basic arithmetic
+      if (input.match(/(\d+)\s*\+\s*(\d+)/)) {
+        const match = input.match(/(\d+)\s*\+\s*(\d+)/);
+        if (match) {
+          const result = parseInt(match[1]) + parseInt(match[2]);
+          return `${match[1]} + ${match[2]} = ${result}`;
+        }
+      }
+      
+      if (input.match(/(\d+)\s*-\s*(\d+)/)) {
+        const match = input.match(/(\d+)\s*-\s*(\d+)/);
+        if (match) {
+          const result = parseInt(match[1]) - parseInt(match[2]);
+          return `${match[1]} - ${match[2]} = ${result}`;
+        }
+      }
+      
+      if (input.match(/(\d+)\s*\*\s*(\d+)/)) {
+        const match = input.match(/(\d+)\s*\*\s*(\d+)/);
+        if (match) {
+          const result = parseInt(match[1]) * parseInt(match[2]);
+          return `${match[1]} × ${match[2]} = ${result}`;
+        }
+      }
+      
+      if (input.match(/(\d+)\s*\/\s*(\d+)/)) {
+        const match = input.match(/(\d+)\s*\/\s*(\d+)/);
+        if (match) {
+          const result = parseInt(match[1]) / parseInt(match[2]);
+          return `${match[1]} ÷ ${match[2]} = ${result}`;
+        }
+      }
+      
+      // Quadratic equations
+      if (input.match(/solve\s+(.+?)\s*=\s*0/i)) {
+        return "I'll help you solve this quadratic equation! 📐\n\n**Quadratic Formula Method:**\nFor equations in the form ax² + bx + c = 0\nUse: x = (-b ± √(b² - 4ac)) / 2a\n\n**Step-by-step example:** x² - 5x + 6 = 0\n1️⃣ Identify coefficients: a = 1, b = -5, c = 6\n2️⃣ Calculate discriminant: b² - 4ac = 25 - 24 = 1\n3️⃣ Apply formula: x = (5 ± √1) / 2 = (5 ± 1) / 2\n4️⃣ Solutions: x = 3 or x = 2\n\n**Verification:** \n• 3² - 5(3) + 6 = 9 - 15 + 6 = 0 ✓\n• 2² - 5(2) + 6 = 4 - 10 + 6 = 0 ✓\n\nWould you like me to solve a specific quadratic equation for you?";
+      }
+      
+      // Derivatives
+      if (input.match(/derivative\s+of\s+(.+)/i)) {
+        const match = input.match(/derivative\s+of\s+(.+)/i);
+        if (match && match[1].includes('x^')) {
+          return `For power rule: d/dx(xⁿ) = nxⁿ⁻¹\nFor ${match[1]}: Use the power rule and chain rule if needed.\n\nCommon derivatives:\n• d/dx(x²) = 2x\n• d/dx(x³) = 3x²\n• d/dx(sin(x)) = cos(x)\n• d/dx(cos(x)) = -sin(x)`;
+        }
+      }
+      
+      return "I can help with basic arithmetic, quadratic equations, derivatives, and more! Try asking: 'solve x² - 5x + 6 = 0' or 'derivative of x³'";
+    }
+  },
+  {
+    subject: 'physics',
+    patterns: [
+      /force\s*=\s*(.+)/i,
+      /velocity\s*=\s*(.+)/i,
+      /acceleration\s*=\s*(.+)/i,
+      /kinetic\s+energy/i,
+      /potential\s+energy/i
+    ],
+    solver: (input: string) => {
+      if (input.match(/force/i)) {
+        return "Let's explore Newton's Second Law of Motion! ⚡\n\n**Formula:** F = ma\n• F = Force (measured in Newtons, N)\n• m = Mass (measured in kilograms, kg)\n• a = Acceleration (measured in m/s²)\n\n**Real-world example:**\nA 10kg box is pushed with 50N of force\n• Given: m = 10kg, F = 50N\n• Find: a = ?\n• Solution: a = F/m = 50N ÷ 10kg = 5 m/s²\n\n**Key insights:**\n🔹 More force = more acceleration\n🔹 More mass = less acceleration (for same force)\n🔹 Force and acceleration are in the same direction\n\n**Applications:**\n• Car engines (force) accelerate cars (mass)\n• Rockets need huge force to accelerate in space\n• Why it's harder to push a full shopping cart\n\nNeed help with a specific force calculation?";
+      }
+      
+      if (input.match(/kinetic\s+energy/i)) {
+        return "Kinetic Energy: KE = ½mv²\nWhere m = mass (kg), v = velocity (m/s)\n\nExample: 2kg object moving at 10m/s\nKE = ½ × 2 × 10² = 100J";
+      }
+      
+      if (input.match(/potential\s+energy/i)) {
+        return "Gravitational Potential Energy: PE = mgh\nWhere m = mass (kg), g = 9.8m/s², h = height (m)\n\nExample: 5kg object at 10m height\nPE = 5 × 9.8 × 10 = 490J";
+      }
+      
+      return "I can help with Newton's laws, energy, motion equations, and more! Try asking about 'kinetic energy' or 'force calculations'";
+    }
+  },
+  {
+    subject: 'chemistry',
+    patterns: [
+      /balance\s+(.+)/i,
+      /molarity\s+(.+)/i,
+      /moles\s+(.+)/i,
+      /molecular\s+weight/i
+    ],
+    solver: (input: string) => {
+      if (input.match(/balance/i)) {
+        return "To balance chemical equations:\n1. Count atoms of each element on both sides\n2. Adjust coefficients (not subscripts)\n3. Start with the most complex molecule\n\nExample: H₂ + O₂ → H₂O\nBalanced: 2H₂ + O₂ → 2H₂O";
+      }
+      
+      if (input.match(/molarity/i)) {
+        return "Molarity (M) = moles of solute / liters of solution\n\nExample: 2 moles NaCl in 1L water\nM = 2 mol / 1 L = 2M\n\nTo find moles: moles = Molarity × Volume(L)";
+      }
+      
+      return "I can help with balancing equations, molarity, stoichiometry, and more! Try asking 'how to balance equations' or 'calculate molarity'";
+    }
+  }
+];
+
+// Enhanced AI response generator with ChatGPT-like capabilities
+const generateSmartResponse = (input: string): string => {
+  const lowerInput = input.toLowerCase();
+  
+  // Check for subject-specific problems first
+  for (const solver of problemSolvers) {
+    for (const pattern of solver.patterns) {
+      if (pattern.test(input)) {
+        return solver.solver(input);
+      }
+    }
+  }
+  
+  // Advanced conversational responses
+  if (lowerInput.includes('hello') || lowerInput.includes('hi') || lowerInput.includes('hey')) {
+    return "Hello! I'm your AI study assistant. I'm here to help you with academic questions, study strategies, and using Grind Clock effectively. What would you like to work on today?";
+  }
+  
+  if (lowerInput.includes('thank') || lowerInput.includes('thanks')) {
+    return "You're very welcome! I'm glad I could help. Feel free to ask me anything else about your studies or if you need help with math, science, or study techniques. Keep up the great work! 🎓";
+  }
+  
+  // Study strategies and techniques
+  if (lowerInput.includes('study') && (lowerInput.includes('tip') || lowerInput.includes('method') || lowerInput.includes('technique'))) {
+    return "Here are proven study techniques that work:\n\n🍅 **Pomodoro Technique**: 25min focused study + 5min break\n📚 **Active Recall**: Test yourself instead of re-reading\n🔄 **Spaced Repetition**: Review material at increasing intervals\n🎯 **Feynman Technique**: Explain concepts in simple terms\n📝 **Cornell Notes**: Structured note-taking system\n🧠 **Mind Mapping**: Visual organization of information\n\nWhich technique would you like me to explain in more detail?";
+  }
+  
+  if (lowerInput.includes('motivation') || lowerInput.includes('procrastination') || lowerInput.includes('lazy')) {
+    return "I understand the struggle with motivation! Here's how to overcome procrastination:\n\n🎯 **Start Small**: Break tasks into 2-minute actions\n⏰ **Time Boxing**: Set specific time limits for tasks\n🏆 **Reward System**: Celebrate small wins\n📱 **Remove Distractions**: Put phone in another room\n👥 **Accountability**: Study with friends or use Grind Clock's streaks\n🎵 **Environment**: Create a dedicated study space\n💪 **Energy Management**: Study when you're most alert\n\nRemember: Motivation gets you started, but habits keep you going. Your study streaks in Grind Clock are building that habit!";
+  }
+  
+  if (lowerInput.includes('focus') || lowerInput.includes('concentration') || lowerInput.includes('distract')) {
+    return "Let's boost your focus! Here are scientifically-backed concentration techniques:\n\n🧘 **Mindfulness**: 5-minute meditation before studying\n🎧 **Binaural Beats**: 40Hz gamma waves for focus\n💧 **Hydration**: Dehydration reduces focus by 12%\n🌡️ **Temperature**: 68-72°F is optimal for concentration\n⏰ **Ultradian Rhythms**: Work in 90-minute cycles\n👀 **20-20-20 Rule**: Every 20min, look 20ft away for 20sec\n🍎 **Nutrition**: Avoid sugar crashes, eat brain foods\n\nTry the focus rating feature in your study sessions to track what works best for you!";
+  }
+  
+  if (lowerInput.includes('exam') || lowerInput.includes('test') || lowerInput.includes('preparation')) {
+    return "Exam success strategy! Here's your comprehensive preparation plan:\n\n📅 **Planning Phase** (4-6 weeks before):\n• Create study schedule in Goals Manager\n• Gather all materials and past papers\n• Identify weak areas using your analytics\n\n📚 **Active Study Phase** (2-4 weeks before):\n• Use active recall and practice tests\n• Form study groups for discussion\n• Create summary notes and flashcards\n\n🎯 **Final Preparation** (1 week before):\n• Review summaries, no new material\n• Practice exam timing and conditions\n• Prepare exam day logistics\n\n🧠 **Exam Day**:\n• Good sleep (7-9 hours)\n• Healthy breakfast\n• Arrive early and stay calm\n• Read questions carefully\n\nWhat specific exam are you preparing for?";
+  }
+  
+  // Memory and learning
+  if (lowerInput.includes('memory') || lowerInput.includes('remember') || lowerInput.includes('forget')) {
+    return "Memory enhancement techniques that actually work:\n\n🧠 **Encoding Strategies**:\n• Elaborative rehearsal (connect to existing knowledge)\n• Visual imagery and mnemonics\n• Multi-sensory learning (see, hear, write, speak)\n\n🔄 **Consolidation Methods**:\n• Sleep (8 hours for memory consolidation)\n• Spaced repetition (review at 1 day, 3 days, 1 week, 1 month)\n• Interleaving (mix different topics)\n\n📤 **Retrieval Practice**:\n• Self-testing without looking at notes\n• Teach someone else the material\n• Use flashcards and practice questions\n\nYour brain forms stronger memories when you actively retrieve information rather than just re-reading!";
+  }
+  
+  // Time management
+  if (lowerInput.includes('time') && (lowerInput.includes('manage') || lowerInput.includes('schedule') || lowerInput.includes('plan'))) {
+    return "Master time management with these proven strategies:\n\n⏰ **Time Blocking**:\n• Assign specific times to specific tasks\n• Use Grind Clock's timer for focused blocks\n• Include buffer time between tasks\n\n📋 **Priority Matrix** (Eisenhower Method):\n• Urgent + Important = Do first\n• Important + Not Urgent = Schedule\n• Urgent + Not Important = Delegate\n• Neither = Eliminate\n\n🎯 **Goal Setting** (SMART method):\n• Specific, Measurable, Achievable, Relevant, Time-bound\n• Use Goals Manager to track progress\n\n📊 **Track & Analyze**:\n• Use your study analytics to identify patterns\n• Adjust schedule based on your peak performance times\n\nWhat's your biggest time management challenge?";
+  }
+  
+  // Note-taking
+  if (lowerInput.includes('note') || lowerInput.includes('notes')) {
+    return "Effective note-taking systems for better learning:\n\n📝 **Cornell Note System**:\n• Divide page: Notes | Cues | Summary\n• Take notes in main area during class\n• Add cues/questions in left margin\n• Summarize at bottom after class\n\n🗺️ **Mind Mapping**:\n• Central topic in middle\n• Branch out with subtopics\n• Use colors and images\n• Great for visual learners\n\n📊 **Outline Method**:\n• Hierarchical structure\n• Main topics → Subtopics → Details\n• Easy to review and organize\n\n⚡ **Digital vs Paper**:\n• Paper: Better for retention and math\n• Digital: Searchable, shareable, multimedia\n• Hybrid: Write first, digitize later\n\nWhich subjects are you taking notes for?";
+  }
+  
+  // Stress and anxiety
+  if (lowerInput.includes('stress') || lowerInput.includes('anxiety') || lowerInput.includes('nervous') || lowerInput.includes('overwhelm')) {
+    return "Managing study stress and anxiety effectively:\n\n🧘 **Immediate Relief**:\n• 4-7-8 breathing (inhale 4, hold 7, exhale 8)\n• Progressive muscle relaxation\n• 5-minute mindfulness meditation\n\n📋 **Long-term Strategies**:\n• Break large tasks into smaller steps\n• Use your study analytics to see progress\n• Maintain regular sleep schedule\n• Exercise regularly (even 10-minute walks help)\n\n🎯 **Reframe Thoughts**:\n• \"I can't do this\" → \"I'm learning how to do this\"\n• \"This is too hard\" → \"This will help me grow\"\n• \"I'm behind\" → \"I'm making progress\"\n\n⚖️ **Balance**:\n• Schedule breaks and fun activities\n• Connect with friends and family\n• Celebrate small wins with your study streaks\n\nRemember: Some stress is normal and can actually improve performance. You've got this! 💪";
+  }
+  
+  // Grind Clock specific help
+  if (lowerInput.includes('grind clock') || lowerInput.includes('app') || lowerInput.includes('feature')) {
+    return "Let me help you get the most out of Grind Clock! Here's what you can do:\n\n⏱️ **Study Timer**: Track focused study sessions with pause/resume\n📚 **Subject Manager**: Organize subjects with colors and difficulty levels\n🎯 **Goals Manager**: Set study goals and exam targets with deadlines\n📊 **Analytics**: View completion rates, focus ratings, and progress trends\n🔥 **Study Streaks**: Build consistent study habits and unlock achievements\n📅 **Study Calendar**: Plan and schedule your study sessions\n🤖 **AI Assistant**: Get help with academic problems and study advice (that's me!)\n\nWhich feature would you like to learn more about? Or do you have a specific question about using the app?";
+  }
+  
+  // Default conversational response
+  const responses = [
+    "I'm here to help with your studies! I can assist with math problems, science concepts, study techniques, and using Grind Clock effectively. What specific topic or question do you have?",
+    "Great question! I specialize in academic support and study strategies. Whether you need help with calculations, understanding concepts, or improving your study habits, I'm here for you. What would you like to explore?",
+    "I'd be happy to help! I can solve problems, explain concepts, provide study tips, and guide you through using Grind Clock's features. What's on your mind today?",
+    "Let's tackle this together! I'm equipped to help with mathematics, sciences, study methods, and productivity techniques. What specific challenge are you facing?"
+  ];
+  
+  return responses[Math.floor(Math.random() * responses.length)] + "\n\n💡 **Try asking me about:**\n• Math problems (\"solve x² - 5x + 6 = 0\")\n• Science concepts (\"explain photosynthesis\")\n• Study techniques (\"how to improve memory\")\n• Grind Clock features (\"how do study streaks work\")";
+};
+
+export function DoubtSolver({ isDarkMode }: DoubtSolverProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [customQuestion, setCustomQuestion] = useState('');
+  const [activeTab, setActiveTab] = useState<'faq' | 'chat'>('chat');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      id: '1',
+      type: 'bot',
+      content: "Hello! I'm your AI-powered study assistant! 🤖✨\n\nI'm here to help you succeed in your studies. I can:\n\n📐 **Solve Math Problems**: Algebra, calculus, geometry, statistics\n⚗️ **Explain Science**: Physics, chemistry, biology concepts\n💻 **Programming Help**: Algorithms, debugging, best practices\n📚 **Study Strategies**: Memory techniques, time management, exam prep\n🎯 **Grind Clock Support**: Features, analytics, goal setting\n\nI'm designed to provide detailed explanations and step-by-step solutions. Just ask me anything!\n\n💡 **Try starting with**: \"solve x² - 4 = 0\" or \"how to improve focus while studying\"",
+      timestamp: new Date()
+    }
+  ]);
+  const [isTyping, setIsTyping] = useState(false);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const chatMessagesRef = useRef<HTMLDivElement>(null);
+
+  const filteredFAQs = faqs.filter(faq => {
+    const matchesCategory = selectedCategory === 'all' || faq.category === selectedCategory;
+    const matchesSearch = faq.question.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         faq.answer.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesCategory && matchesSearch;
+  });
+
+  const handleSubmitQuestion = async () => {
+    if (!customQuestion.trim()) return;
+    
+    // Add user message
+    const userMessage: ChatMessage = {
+      id: Date.now().toString(),
+      type: 'user',
+      content: customQuestion,
+      timestamp: new Date()
+    };
+    
+    setChatMessages(prev => [...prev, userMessage]);
+    setCustomQuestion('');
+    setIsTyping(true);
+    
+    // Simulate AI thinking time
+    setTimeout(() => {
+      const aiResponse = generateSmartResponse(customQuestion);
+      const botMessage: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        type: 'bot',
+        content: aiResponse,
+        timestamp: new Date()
+      };
+      
+      setChatMessages(prev => [...prev, botMessage]);
+      setIsTyping(false);
+    }, 1000 + Math.random() * 1000); // Random delay between 1-2 seconds
+  };
+
+  const clearChat = () => {
+    setChatMessages([
+      {
+        id: '1',
+        type: 'bot',
+        content: "Hello! I'm your AI-powered study assistant! 🤖✨\n\nI'm here to help you succeed in your studies. I can:\n\n📐 **Solve Math Problems**: Algebra, calculus, geometry, statistics\n⚗️ **Explain Science**: Physics, chemistry, biology concepts\n💻 **Programming Help**: Algorithms, debugging, best practices\n📚 **Study Strategies**: Memory techniques, time management, exam prep\n🎯 **Grind Clock Support**: Features, analytics, goal setting\n\nI'm designed to provide detailed explanations and step-by-step solutions. Just ask me anything!\n\n💡 **Try starting with**: \"solve x² - 4 = 0\" or \"how to improve focus while studying\"",
+        timestamp: new Date()
+      }
+    ]);
+  };
+
+  // Auto-scroll to bottom when new messages are added
+  useEffect(() => {
+    if (chatMessagesRef.current) {
+      const element = chatMessagesRef.current;
+      // Force scroll to bottom with a small delay to ensure content is rendered
+      setTimeout(() => {
+        element.scrollTop = element.scrollHeight;
+      }, 100);
+    }
+  }, [chatMessages, isTyping]);
+
+  // Handle scroll detection
+  const handleScroll = () => {
+    if (chatMessagesRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = chatMessagesRef.current;
+      const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10;
+      setShowScrollButton(!isAtBottom && chatMessages.length > 3);
+    }
+  };
+
+  const scrollToBottom = () => {
+    if (chatMessagesRef.current) {
+      chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight;
+    }
+  };
+
+  return (
+    <>
+      {/* Floating Button */}
+      <div className="fixed bottom-6 right-6 z-40">
+        <button
+          onClick={() => setIsOpen(true)}
+          className={`relative w-16 h-16 rounded-full shadow-2xl transition-all duration-300 hover:scale-110 group ${
+            isDarkMode
+              ? 'bg-gradient-to-br from-blue-600 to-purple-700 hover:from-blue-500 hover:to-purple-600'
+              : 'bg-gradient-to-br from-blue-500 to-purple-600 hover:from-blue-400 hover:to-purple-500'
+          }`}
+          title="AI Study Assistant - Get instant help!"
+        >
+          <div className="flex items-center justify-center">
+            <Bot className="text-white" size={28} />
+          </div>
+          
+          {/* Pulse Animation */}
+          <div className={`absolute inset-0 rounded-full animate-ping opacity-20 ${
+            isDarkMode ? 'bg-blue-400' : 'bg-blue-300'
+          }`}></div>
+          
+          {/* AI Badge */}
+          <div className="absolute -top-2 -right-2 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+            AI
+          </div>
+        </button>
+        
+        {/* Tooltip */}
+        <div className={`absolute bottom-20 right-0 mb-2 px-3 py-2 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap ${
+          isDarkMode ? 'bg-slate-800 text-white border border-slate-700' : 'bg-white text-slate-900 border border-slate-200'
+        }`}>
+          <div className="text-sm font-medium">AI Study Assistant</div>
+          <div className="text-xs opacity-75">Math • Physics • Chemistry • Study Tips</div>
+        </div>
+      </div>
+
+      {/* Help Modal */}
+      {isOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className={`w-full max-w-2xl h-[80vh] max-h-[600px] rounded-2xl shadow-2xl flex flex-col ${
+            isDarkMode ? 'bg-slate-800 border border-slate-700' : 'bg-white border border-slate-200'
+          }`}>
+            {/* Header */}
+            <div className={`p-6 border-b ${
+              isDarkMode ? 'border-slate-700 bg-gradient-to-r from-blue-900/50 to-purple-900/50' : 'border-slate-200 bg-gradient-to-r from-blue-50 to-purple-50'
+            }`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${
+                    isDarkMode ? 'bg-blue-600' : 'bg-blue-500'
+                  }`}>
+                    <HelpCircle className="text-white" size={24} />
+                  </div>
+                  <div>
+                    <h2 className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                      Doubt Solver & Study Assistant
+                    </h2>
+                    <p className={`text-sm ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                      Get help with app usage & solve academic problems
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsOpen(false)}
+                  className={`p-2 rounded-lg transition-colors ${
+                    isDarkMode ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex flex-col flex-1 min-h-0">
+              {/* Tab Navigation */}
+              <div className={`flex border-b ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+                <button
+                  onClick={() => setActiveTab('chat')}
+                  className={`flex items-center gap-2 px-6 py-3 font-medium transition-all ${
+                    activeTab === 'chat'
+                      ? isDarkMode
+                        ? 'bg-blue-600 text-white border-b-2 border-blue-400'
+                        : 'bg-blue-500 text-white border-b-2 border-blue-300'
+                      : isDarkMode
+                      ? 'text-slate-300 hover:bg-slate-700'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <Bot size={18} />
+                  AI Assistant
+                </button>
+                <button
+                  onClick={() => setActiveTab('faq')}
+                  className={`flex items-center gap-2 px-6 py-3 font-medium transition-all ${
+                    activeTab === 'faq'
+                      ? isDarkMode
+                        ? 'bg-blue-600 text-white border-b-2 border-blue-400'
+                        : 'bg-blue-500 text-white border-b-2 border-blue-300'
+                      : isDarkMode
+                      ? 'text-slate-300 hover:bg-slate-700'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <Search size={18} />
+                  FAQ & Guides
+                </button>
+              </div>
+
+              {/* Chat Tab */}
+              {activeTab === 'chat' && (
+                <div className="flex flex-col h-full">
+                  {/* Chat Messages Container */}
+                  <div className="flex-1 relative overflow-hidden">
+                    <div 
+                      ref={chatMessagesRef}
+                      onScroll={handleScroll}
+                      className="absolute inset-0 overflow-y-scroll p-4 space-y-4"
+                      style={{ scrollBehavior: 'smooth' }}
+                    >
+                    {chatMessages.map((message) => (
+                      <div
+                        key={message.id}
+                        className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div
+                          className={`max-w-[80%] p-3 rounded-lg ${
+                            message.type === 'user'
+                              ? isDarkMode
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-blue-500 text-white'
+                              : isDarkMode
+                              ? 'bg-slate-700 text-slate-200'
+                              : 'bg-slate-100 text-slate-800'
+                          }`}
+                        >
+                          {message.type === 'bot' && (
+                            <div className="flex items-center gap-2 mb-2">
+                              <Bot size={16} className={isDarkMode ? 'text-blue-400' : 'text-blue-600'} />
+                              <span className="text-xs font-medium">AI Assistant</span>
+                            </div>
+                          )}
+                          <div className="whitespace-pre-line text-sm leading-relaxed">
+                            {message.content}
+                          </div>
+                          <div className={`text-xs mt-2 opacity-70`}>
+                            {message.timestamp.toLocaleTimeString()}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    
+                      {/* Typing Indicator */}
+                      {isTyping && (
+                        <div className="flex justify-start">
+                          <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                            <div className="flex items-center gap-2">
+                              <Bot size={16} className={isDarkMode ? 'text-blue-400' : 'text-blue-600'} />
+                              <div className="flex gap-1">
+                                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+                                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Scroll to Bottom Button */}
+                    {showScrollButton && (
+                      <button
+                        onClick={scrollToBottom}
+                        className={`absolute bottom-4 right-4 w-10 h-10 rounded-full shadow-lg transition-all hover:scale-110 ${
+                          isDarkMode
+                            ? 'bg-blue-600 hover:bg-blue-500 text-white'
+                            : 'bg-blue-500 hover:bg-blue-400 text-white'
+                        }`}
+                        title="Scroll to bottom"
+                      >
+                        <ArrowRight className="transform rotate-90 mx-auto" size={16} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Chat Input */}
+                  <div className={`flex-shrink-0 p-4 border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+                    {/* Quick Suggestions */}
+                    {chatMessages.length <= 1 && (
+                      <div className="mb-3">
+                        <p className={`text-xs mb-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                          Quick suggestions:
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            "solve x² - 5x + 6 = 0",
+                            "explain photosynthesis process",
+                            "how to improve memory retention",
+                            "what is Newton's second law",
+                            "study tips for exam preparation",
+                            "how do I stay motivated",
+                            "explain derivatives in calculus"
+                          ].map((suggestion) => (
+                            <button
+                              key={suggestion}
+                              onClick={() => {
+                                setCustomQuestion(suggestion);
+                                setTimeout(() => handleSubmitQuestion(), 100);
+                              }}
+                              disabled={isTyping}
+                              className={`text-xs px-2 py-1 rounded transition-colors ${
+                                isDarkMode
+                                  ? 'bg-slate-700 text-slate-300 hover:bg-slate-600 disabled:opacity-50'
+                                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-50'
+                              }`}
+                            >
+                              {suggestion}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    <div className="flex gap-2 mb-2">
+                      <button
+                        onClick={clearChat}
+                        className={`text-xs px-3 py-1 rounded transition-colors ${
+                          isDarkMode
+                            ? 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        Clear Chat
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Ask me anything about math, physics, chemistry, or study tips..."
+                          value={customQuestion}
+                          onChange={(e) => {
+                            // Prevent multi-line input by removing newlines
+                            const singleLineValue = e.target.value.replace(/[\r\n]/g, '');
+                            setCustomQuestion(singleLineValue);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey && !isTyping && customQuestion.trim()) {
+                              e.preventDefault();
+                              handleSubmitQuestion();
+                            }
+                            // Prevent Enter key from creating new lines
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                            }
+                          }}
+                          disabled={isTyping}
+                          maxLength={500}
+                          className={`flex-1 px-3 py-2 rounded-lg border text-sm transition-colors ${
+                            isDarkMode
+                              ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400 focus:border-blue-500'
+                              : 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-500 focus:border-blue-500'
+                          } focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:opacity-50`}
+                        />
+                        <button
+                          onClick={handleSubmitQuestion}
+                          disabled={!customQuestion.trim() || isTyping}
+                          className={`px-4 py-2 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                            isDarkMode
+                              ? 'bg-blue-600 hover:bg-blue-500 text-white'
+                              : 'bg-blue-500 hover:bg-blue-400 text-white'
+                          }`}
+                        >
+                          {isTyping ? (
+                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                          ) : (
+                            <Send size={16} />
+                          )}
+                        </button>
+                      </div>
+                      
+                      {/* Character counter and help text */}
+                      <div className="flex justify-between items-center">
+                        <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                          Press Enter to send • Try: "solve x² - 4 = 0" or "study tips"
+                        </p>
+                        <span className={`text-xs ${
+                          customQuestion.length > 450 
+                            ? 'text-red-500' 
+                            : isDarkMode ? 'text-slate-400' : 'text-slate-500'
+                        }`}>
+                          {customQuestion.length}/500
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* FAQ Tab */}
+              {activeTab === 'faq' && (
+                <div className="flex flex-col flex-1 overflow-hidden">
+                  {/* Scrollable Content */}
+                  <div className="flex-1 overflow-y-auto" style={{ scrollBehavior: 'smooth' }}>
+                    {/* Header Stats */}
+                    <div className={`p-4 border-b ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h2 className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                          📚 Knowledge Base
+                        </h2>
+                        <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                          Comprehensive guides and tutorials
+                        </p>
+                      </div>
+                      <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                        isDarkMode ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {filteredFAQs.length} {filteredFAQs.length === 1 ? 'guide' : 'guides'}
+                      </div>
+                    </div>
+                  </div>
+
+                    {/* Search and Categories */}
+                    <div className="p-4 space-y-4">
+                    {/* Enhanced Search Bar */}
+                    <div className="relative">
+                      <div className={`absolute left-4 top-1/2 transform -translate-y-1/2 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                        <Search size={20} />
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Search guides, tutorials, and help topics..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className={`w-full pl-12 pr-4 py-4 rounded-xl border-2 transition-all text-sm ${
+                          isDarkMode
+                            ? 'bg-slate-800 border-slate-600 text-white placeholder-slate-400 focus:border-blue-500 focus:bg-slate-700'
+                            : 'bg-white border-slate-200 text-slate-900 placeholder-slate-500 focus:border-blue-500 focus:bg-blue-50/50'
+                        } focus:outline-none focus:ring-4 focus:ring-blue-500/10 shadow-sm hover:shadow-md`}
+                      />
+                      {searchQuery && (
+                        <button
+                          onClick={() => setSearchQuery('')}
+                          className={`absolute right-3 top-1/2 transform -translate-y-1/2 p-1 rounded-full transition-colors ${
+                            isDarkMode ? 'hover:bg-slate-600 text-slate-400' : 'hover:bg-slate-100 text-slate-500'
+                          }`}
+                        >
+                          <X size={16} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Enhanced Category Tabs */}
+                    <div className="space-y-3">
+                      <h4 className={`text-sm font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                        Browse by Category
+                      </h4>
+                      <div className="flex flex-wrap gap-2">
+                        {categories.map((category) => {
+                          const Icon = category.icon;
+                          const isActive = selectedCategory === category.id;
+                          const isAppCategory = ['timer', 'subjects', 'goals', 'analytics', 'streaks', 'general'].includes(category.id);
+                          const isAcademicCategory = ['math', 'physics', 'chemistry', 'biology', 'programming', 'english', 'history'].includes(category.id);
+                          
+                          return (
+                            <button
+                              key={category.id}
+                              onClick={() => setSelectedCategory(category.id)}
+                              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all hover:scale-105 ${
+                                isActive
+                                  ? isAppCategory
+                                    ? 'bg-gradient-to-r from-blue-500 to-cyan-600 text-white shadow-lg'
+                                    : isAcademicCategory
+                                    ? 'bg-gradient-to-r from-purple-500 to-violet-600 text-white shadow-lg'
+                                    : 'bg-gradient-to-r from-gray-500 to-slate-600 text-white shadow-lg'
+                                  : isDarkMode
+                                  ? 'bg-slate-700 text-slate-300 hover:bg-slate-600 border border-slate-600'
+                                  : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 shadow-sm'
+                              }`}
+                            >
+                              <Icon size={16} />
+                              {category.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                    {/* FAQ List - Enhanced Design */}
+                    <div className="px-4 pb-4">
+                    {/* Featured Quick Help */}
+                    {selectedCategory === 'all' && searchQuery === '' && (
+                      <div className="mb-6">
+                        <h3 className={`text-lg font-bold mb-4 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                          🚀 Quick Start Guide
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+                          {[
+                            { title: "Start Your First Session", desc: "Begin tracking your study time", icon: Clock, color: "from-green-500 to-emerald-600" },
+                            { title: "Add Study Subjects", desc: "Organize your learning topics", icon: Book, color: "from-blue-500 to-cyan-600" },
+                            { title: "Set Study Goals", desc: "Define your academic targets", icon: Target, color: "from-purple-500 to-violet-600" },
+                            { title: "View Your Progress", desc: "Track your study analytics", icon: BarChart3, color: "from-orange-500 to-red-600" }
+                          ].map((item, index) => {
+                            const Icon = item.icon;
+                            return (
+                              <div
+                                key={index}
+                                className={`p-4 rounded-xl bg-gradient-to-br ${item.color} text-white shadow-lg hover:shadow-xl transition-all cursor-pointer group`}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <Icon size={24} className="group-hover:scale-110 transition-transform" />
+                                  <div>
+                                    <h4 className="font-semibold text-sm">{item.title}</h4>
+                                    <p className="text-xs opacity-90">{item.desc}</p>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* FAQ Cards */}
+                    <div className="space-y-4">
+                      {filteredFAQs.map((faq, index) => {
+                        const Icon = faq.icon;
+                        const isAppUsage = ['timer', 'subjects', 'goals', 'analytics', 'streaks', 'general'].includes(faq.category);
+                        const isAcademic = ['math', 'physics', 'chemistry', 'biology', 'programming', 'english', 'history'].includes(faq.category);
+                        
+                        return (
+                          <div
+                            key={faq.id}
+                            className={`group relative overflow-hidden rounded-xl border transition-all duration-300 hover:shadow-lg hover:-translate-y-1 ${
+                              isDarkMode
+                                ? 'bg-gradient-to-br from-slate-800 to-slate-700 border-slate-600 hover:border-slate-500'
+                                : 'bg-gradient-to-br from-white to-slate-50 border-slate-200 hover:border-slate-300 hover:shadow-xl'
+                            }`}
+                          >
+                            {/* Category Badge */}
+                            <div className={`absolute top-3 right-3 px-2 py-1 rounded-full text-xs font-medium ${
+                              isAppUsage 
+                                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                                : isAcademic
+                                ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+                                : 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-300'
+                            }`}>
+                              {isAppUsage ? 'App Guide' : isAcademic ? 'Academic' : 'General'}
+                            </div>
+
+                            <div className="p-6">
+                              <div className="flex items-start gap-4">
+                                {/* Icon with Background */}
+                                <div className={`flex-shrink-0 w-12 h-12 rounded-xl flex items-center justify-center ${
+                                  isAppUsage
+                                    ? 'bg-gradient-to-br from-blue-500 to-cyan-600'
+                                    : isAcademic
+                                    ? 'bg-gradient-to-br from-purple-500 to-violet-600'
+                                    : 'bg-gradient-to-br from-gray-500 to-slate-600'
+                                }`}>
+                                  <Icon className="text-white" size={24} />
+                                </div>
+
+                                <div className="flex-1 min-w-0">
+                                  {/* Question */}
+                                  <h3 className={`font-bold text-lg mb-3 leading-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                                    {faq.question}
+                                  </h3>
+                                  
+                                  {/* Answer */}
+                                  <div className={`text-sm leading-relaxed whitespace-pre-line ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                                    {faq.answer}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Hover Effect Gradient */}
+                              <div className={`absolute inset-0 opacity-0 group-hover:opacity-5 transition-opacity ${
+                                isAppUsage
+                                  ? 'bg-gradient-to-br from-blue-500 to-cyan-600'
+                                  : isAcademic
+                                  ? 'bg-gradient-to-br from-purple-500 to-violet-600'
+                                  : 'bg-gradient-to-br from-gray-500 to-slate-600'
+                              }`}></div>
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {/* Empty State */}
+                      {filteredFAQs.length === 0 && (
+                        <div className={`text-center py-12 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                          <div className={`w-20 h-20 mx-auto mb-4 rounded-full flex items-center justify-center ${
+                            isDarkMode ? 'bg-slate-700' : 'bg-slate-100'
+                          }`}>
+                            <Search size={32} className="opacity-50" />
+                          </div>
+                          <h3 className="text-lg font-semibold mb-2">No results found</h3>
+                          <p className="text-sm mb-4">Try adjusting your search or browse different categories</p>
+                          <button
+                            onClick={() => setActiveTab('chat')}
+                            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                              isDarkMode
+                                ? 'bg-blue-600 hover:bg-blue-500 text-white'
+                                : 'bg-blue-500 hover:bg-blue-400 text-white'
+                            }`}
+                          >
+                            Ask AI Assistant Instead
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

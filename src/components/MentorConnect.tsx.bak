@@ -1,0 +1,551 @@
+import { useEffect, useState } from 'react';
+import { Users, Star, Calendar, Search, MessageSquare, Award, Clock, Video, Loader2, X, Shield, Briefcase, GraduationCap, Globe, Linkedin, Github, TrendingUp, Filter } from 'lucide-react';
+import { Mentor } from '../types';
+import { fetchMentorsFromProfiles, createMentorSession, fetchMentorOfferings, fetchMentorReviews } from '../utils/supabase-queries';
+import { useAuth } from '../contexts/AuthContext';
+
+interface MentorConnectProps {
+    isDarkMode: boolean;
+    onStartVideoCall: (name: string, avatar?: string, mentorId?: string) => void;
+}
+
+interface MentorOffering {
+    id: string;
+    offeringType: string;
+    title: string;
+    description: string;
+    durationMinutes: number;
+    mode: string;
+    isFree: boolean;
+    price: number;
+}
+
+export function MentorConnect({ isDarkMode, onStartVideoCall }: MentorConnectProps) {
+    const { user } = useAuth();
+    const [mentors, setMentors] = useState<Mentor[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
+    const [sortBy, setSortBy] = useState<'rating' | 'students' | 'experience'>('rating');
+    const [showBookingModal, setShowBookingModal] = useState(false);
+    const [showMentorDetailsModal, setShowMentorDetailsModal] = useState(false);
+    const [selectedMentor, setSelectedMentor] = useState<Mentor | null>(null);
+    const [mentorOfferings, setMentorOfferings] = useState<MentorOffering[]>([]);
+    const [mentorReviews, setMentorReviews] = useState<any[]>([]);
+    const [selectedOffering, setSelectedOffering] = useState<MentorOffering | null>(null);
+    const [bookingData, setBookingData] = useState({
+        subject: '',
+        date: '',
+        time: '',
+        duration: 60,
+        notes: ''
+    });
+    const [bookingLoading, setBookingLoading] = useState(false);
+
+    useEffect(() => {
+        const loadMentors = async () => {
+            setLoading(true);
+            const data = await fetchMentorsFromProfiles();
+            setMentors(data);
+            setLoading(false);
+        };
+        loadMentors();
+    }, []);
+
+    const handleViewMentorDetails = async (mentor: Mentor) => {
+        setSelectedMentor(mentor);
+        setShowMentorDetailsModal(true);
+        
+        // Load mentor offerings and reviews
+        const offerings = await fetchMentorOfferings(mentor.id);
+        const reviews = await fetchMentorReviews(mentor.id, 5);
+        setMentorOfferings(offerings);
+        setMentorReviews(reviews);
+    };
+
+    const handleBookSession = (mentor: Mentor, offering?: MentorOffering) => {
+        setSelectedMentor(mentor);
+        setSelectedOffering(offering || null);
+        setShowMentorDetailsModal(false);
+        setShowBookingModal(true);
+        
+        // Set default date to tomorrow
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        setBookingData({
+            subject: offering?.title || mentor.expertise[0] || mentor.domain || '',
+            date: tomorrow.toISOString().split('T')[0],
+            time: '10:00',
+            duration: offering?.durationMinutes || 60,
+            notes: ''
+        });
+    };
+
+    const handleSubmitBooking = async () => {
+        if (!user || !selectedMentor) return;
+
+        setBookingLoading(true);
+        try {
+            const scheduledTime = new Date(`${bookingData.date}T${bookingData.time}`);
+            const result = await createMentorSession(
+                selectedMentor.id,
+                user.id,
+                bookingData.subject,
+                scheduledTime,
+                bookingData.duration,
+                bookingData.notes
+            );
+
+            if (result.error) {
+                alert('Failed to book session. Please try again.');
+            } else {
+                alert('Session request sent! The mentor will confirm shortly.');
+                setShowBookingModal(false);
+                setBookingData({ subject: '', date: '', time: '', duration: 60, notes: '' });
+            }
+        } catch (error) {
+            console.error('Error booking session:', error);
+            alert('An error occurred. Please try again.');
+        } finally {
+            setBookingLoading(false);
+        }
+    };
+
+    // Get unique domains for filtering
+    const allDomains = Array.from(new Set(mentors.map(m => m.domain).filter(Boolean)));
+
+    // Filter and sort mentors
+    const filteredMentors = mentors
+        .filter(mentor => {
+            const matchesSearch = mentor.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                mentor.bio.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                mentor.domain?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                mentor.skills?.some(s => s.toLowerCase().includes(searchTerm.toLowerCase()));
+            const matchesDomain = !selectedDomain || mentor.domain === selectedDomain;
+            return matchesSearch && matchesDomain;
+        })
+        .sort((a, b) => {
+            if (sortBy === 'rating') return (b.rating || 0) - (a.rating || 0);
+            if (sortBy === 'students') return (b.totalStudents || 0) - (a.totalStudents || 0);
+            if (sortBy === 'experience') return (b.experienceYears || 0) - (a.experienceYears || 0);
+            return 0;
+        });
+
+    if (loading) {
+        return (
+            <div className="flex flex-col items-center justify-center py-20">
+                <Loader2 className="w-12 h-12 text-amber-500 animate-spin mb-4" />
+                <p className={isDarkMode ? 'text-slate-400' : 'text-slate-600'}>Loading mentors...</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-6">
+            {/* Header with Search */}
+            <div className="flex flex-col gap-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <h2 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                            Find Your Mentor
+                        </h2>
+                        <p className={`${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                            Learn from {mentors.length}+ verified experts
+                        </p>
+                    </div>
+                    <div className="relative flex-1 md:max-w-md">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                        <input
+                            type="text"
+                            placeholder="Search by name, skill, or domain..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className={`w-full pl-10 pr-4 py-3 rounded-xl border transition-all ${isDarkMode
+                                ? 'bg-slate-800 border-slate-700 text-white focus:border-amber-500'
+                                : 'bg-white border-slate-200 text-slate-900 focus:border-amber-500'
+                            }`}
+                        />
+                    </div>
+                </div>
+
+                {/* Filters and Sort */}
+                <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex items-center gap-2">
+                        <Filter size={18} className={isDarkMode ? 'text-slate-400' : 'text-slate-600'} />
+                        <span className={`text-sm font-medium ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                            Domain:
+                        </span>
+                    </div>
+                    <div className="flex gap-2 overflow-x-auto pb-2 flex-1">
+                        <button
+                            onClick={() => setSelectedDomain(null)}
+                            className={`px-4 py-2 rounded-full text-sm font-medium transition-all whitespace-nowrap ${!selectedDomain
+                                ? 'bg-amber-500 text-white shadow-md'
+                                : isDarkMode ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-slate-100'
+                            }`}
+                        >
+                            All Domains
+                        </button>
+                        {allDomains.map(domain => (
+                            <button
+                                key={domain}
+                                onClick={() => setSelectedDomain(domain)}
+                                className={`px-4 py-2 rounded-full text-sm font-medium transition-all whitespace-nowrap ${selectedDomain === domain
+                                    ? 'bg-amber-500 text-white shadow-md'
+                                    : isDarkMode ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-slate-100'
+                                }`}
+                            >
+                                {domain}
+                            </button>
+                        ))}
+                    </div>
+                    
+                    <div className="flex items-center gap-2">
+                        <TrendingUp size={18} className={isDarkMode ? 'text-slate-400' : 'text-slate-600'} />
+                        <select
+                            value={sortBy}
+                            onChange={(e) => setSortBy(e.target.value as any)}
+                            className={`px-3 py-2 rounded-lg border text-sm ${isDarkMode
+                                ? 'bg-slate-800 border-slate-700 text-white'
+                                : 'bg-white border-slate-200 text-slate-900'
+                            }`}
+                        >
+                            <option value="rating">Top Rated</option>
+                            <option value="students">Most Students</option>
+                            <option value="experience">Most Experienced</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            {/* Mentors Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredMentors.map(mentor => (
+                    <div
+                        key={mentor.id}
+                        className={`rounded-2xl p-6 shadow-lg border transition-all hover:shadow-xl cursor-pointer ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
+                        }`}
+                        onClick={() => handleViewMentorDetails(mentor)}
+                    >
+                        {/* Header */}
+                        <div className="flex items-start gap-4 mb-4">
+                            <div className="relative">
+                                <img
+                                    src={mentor.avatarUrl}
+                                    alt={mentor.name}
+                                    className="w-20 h-20 rounded-2xl object-cover shadow-md"
+                                />
+                                {mentor.isVerified && (
+                                    <div className="absolute -top-1 -right-1 bg-blue-500 rounded-full p-1">
+                                        <Shield size={14} className="text-white" fill="white" />
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex-1">
+                                <h3 className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                                    {mentor.name}
+                                </h3>
+                                {mentor.domain && (
+                                    <p className="text-amber-500 text-sm font-medium">{mentor.domain}</p>
+                                )}
+                                <div className="flex items-center gap-2 mt-1">
+                                    <div className="flex items-center gap-1 text-amber-500">
+                                        <Star size={14} fill="currentColor" />
+                                        <span className="text-sm font-bold">{mentor.rating?.toFixed(1)}</span>
+                                    </div>
+                                    {mentor.totalReviews > 0 && (
+                                        <span className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                                            ({mentor.totalReviews} reviews)
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Experience */}
+                        <div className="space-y-2 mb-4">
+                            {mentor.experienceYears > 0 && (
+                                <div className="flex items-center gap-2 text-sm">
+                                    <Briefcase size={14} className="text-slate-400" />
+                                    <span className={isDarkMode ? 'text-slate-300' : 'text-slate-700'}>
+                                        {mentor.experienceYears}+ years
+                                        {mentor.company && ` • ${mentor.company}`}
+                                    </span>
+                                </div>
+                            )}
+                            {mentor.college && (
+                                <div className="flex items-center gap-2 text-sm">
+                                    <GraduationCap size={14} className="text-slate-400" />
+                                    <span className={isDarkMode ? 'text-slate-300' : 'text-slate-700'}>
+                                        {mentor.college}
+                                    </span>
+                                </div>
+                            )}
+                            {mentor.totalStudents > 0 && (
+                                <div className="flex items-center gap-2 text-sm">
+                                    <Users size={14} className="text-slate-400" />
+                                    <span className={isDarkMode ? 'text-slate-300' : 'text-slate-700'}>
+                                        Helped {mentor.totalStudents} students
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Bio */}
+                        <p className={`text-sm mb-4 line-clamp-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                            {mentor.bio}
+                        </p>
+
+                        {/* Skills */}
+                        <div className="flex flex-wrap gap-2 mb-4">
+                            {mentor.skills?.slice(0, 3).map(skill => (
+                                <span
+                                    key={skill}
+                                    className={`px-2 py-1 rounded-md text-xs font-medium ${isDarkMode ? 'bg-slate-700 text-blue-400' : 'bg-blue-50 text-blue-700'
+                                    }`}
+                                >
+                                    {skill}
+                                </span>
+                            ))}
+                            {mentor.skills && mentor.skills.length > 3 && (
+                                <span className={`px-2 py-1 rounded-md text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                                    +{mentor.skills.length - 3} more
+                                </span>
+                            )}
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex gap-2 pt-2 border-t border-slate-200 dark:border-slate-700">
+                            <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleBookSession(mentor);
+                                }}
+                                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-xl font-medium shadow-md hover:shadow-lg transition-all"
+                            >
+                                <Calendar size={16} />
+                                Book
+                            </button>
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onStartVideoCall(mentor.name, mentor.avatarUrl, mentor.id);
+                                }}
+                                className={`p-2 rounded-xl border transition-all ${isDarkMode ? 'bg-slate-700 border-slate-600 text-blue-400 hover:bg-slate-600' : 'bg-blue-50 border-blue-100 text-blue-600 hover:bg-blue-100'
+                                }`}
+                                title="Video Call"
+                            >
+                                <Video size={18} />
+                            </button>
+                            <button 
+                                onClick={(e) => e.stopPropagation()}
+                                className={`p-2 rounded-xl border transition-all ${isDarkMode ? 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                                }`}
+                                title="Message"
+                            >
+                                <MessageSquare size={18} />
+                            </button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {filteredMentors.length === 0 && (
+                <div className="text-center py-12">
+                    <div className="bg-slate-100 dark:bg-slate-800 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Users className="text-slate-400" size={32} />
+                    </div>
+                    <h3 className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>No mentors found</h3>
+                    <p className={isDarkMode ? 'text-slate-400' : 'text-slate-600'}>Try adjusting your search or filters</p>
+                </div>
+            )}
+
+            {/* Booking Modal */}
+            {showBookingModal && selectedMentor && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className={`rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto ${
+                        isDarkMode ? 'bg-slate-800' : 'bg-white'
+                    }`}>
+                        {/* Modal Header */}
+                        <div className="sticky top-0 bg-gradient-to-r from-amber-500 to-orange-600 p-6 rounded-t-2xl">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <img
+                                        src={selectedMentor.avatarUrl}
+                                        alt={selectedMentor.name}
+                                        className="w-16 h-16 rounded-xl object-cover"
+                                    />
+                                    <div>
+                                        <h3 className="text-2xl font-bold text-white">Book Session</h3>
+                                        <p className="text-amber-100">{selectedMentor.name}</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setShowBookingModal(false)}
+                                    className="p-2 hover:bg-white/20 rounded-lg transition-colors"
+                                >
+                                    <X className="text-white" size={24} />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Modal Body */}
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className={`block text-sm font-medium mb-2 ${
+                                    isDarkMode ? 'text-slate-300' : 'text-slate-700'
+                                }`}>
+                                    Subject
+                                </label>
+                                <select
+                                    value={bookingData.subject}
+                                    onChange={(e) => setBookingData({ ...bookingData, subject: e.target.value })}
+                                    className={`w-full px-4 py-2 rounded-lg border ${
+                                        isDarkMode
+                                            ? 'bg-slate-700 border-slate-600 text-white'
+                                            : 'bg-white border-slate-300 text-slate-900'
+                                    }`}
+                                >
+                                    {selectedMentor.expertise.map(exp => (
+                                        <option key={exp} value={exp}>{exp}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className={`block text-sm font-medium mb-2 ${
+                                        isDarkMode ? 'text-slate-300' : 'text-slate-700'
+                                    }`}>
+                                        Date
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={bookingData.date}
+                                        onChange={(e) => setBookingData({ ...bookingData, date: e.target.value })}
+                                        min={new Date().toISOString().split('T')[0]}
+                                        className={`w-full px-4 py-2 rounded-lg border ${
+                                            isDarkMode
+                                                ? 'bg-slate-700 border-slate-600 text-white'
+                                                : 'bg-white border-slate-300 text-slate-900'
+                                        }`}
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className={`block text-sm font-medium mb-2 ${
+                                        isDarkMode ? 'text-slate-300' : 'text-slate-700'
+                                    }`}>
+                                        Time
+                                    </label>
+                                    <input
+                                        type="time"
+                                        value={bookingData.time}
+                                        onChange={(e) => setBookingData({ ...bookingData, time: e.target.value })}
+                                        className={`w-full px-4 py-2 rounded-lg border ${
+                                            isDarkMode
+                                                ? 'bg-slate-700 border-slate-600 text-white'
+                                                : 'bg-white border-slate-300 text-slate-900'
+                                        }`}
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className={`block text-sm font-medium mb-2 ${
+                                    isDarkMode ? 'text-slate-300' : 'text-slate-700'
+                                }`}>
+                                    Duration
+                                </label>
+                                <select
+                                    value={bookingData.duration}
+                                    onChange={(e) => setBookingData({ ...bookingData, duration: parseInt(e.target.value) })}
+                                    className={`w-full px-4 py-2 rounded-lg border ${
+                                        isDarkMode
+                                            ? 'bg-slate-700 border-slate-600 text-white'
+                                            : 'bg-white border-slate-300 text-slate-900'
+                                    }`}
+                                >
+                                    <option value={30}>30 minutes</option>
+                                    <option value={45}>45 minutes</option>
+                                    <option value={60}>60 minutes</option>
+                                    <option value={90}>90 minutes</option>
+                                    <option value={120}>120 minutes</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className={`block text-sm font-medium mb-2 ${
+                                    isDarkMode ? 'text-slate-300' : 'text-slate-700'
+                                }`}>
+                                    Notes (Optional)
+                                </label>
+                                <textarea
+                                    value={bookingData.notes}
+                                    onChange={(e) => setBookingData({ ...bookingData, notes: e.target.value })}
+                                    placeholder="What would you like to learn or focus on?"
+                                    rows={3}
+                                    className={`w-full px-4 py-2 rounded-lg border ${
+                                        isDarkMode
+                                            ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400'
+                                            : 'bg-white border-slate-300 text-slate-900 placeholder-slate-500'
+                                    }`}
+                                />
+                            </div>
+
+                            <div className={`p-4 rounded-lg ${
+                                isDarkMode ? 'bg-slate-700/50' : 'bg-amber-50'
+                            }`}>
+                                <div className="flex justify-between items-center mb-2">
+                                    <span className={isDarkMode ? 'text-slate-300' : 'text-slate-700'}>
+                                        Session Cost:
+                                    </span>
+                                    <span className="text-xl font-bold text-amber-500">
+                                        ${(selectedMentor.pricePerHour * bookingData.duration / 60).toFixed(2)}
+                                    </span>
+                                </div>
+                                <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                                    The mentor will confirm your booking request
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="p-6 border-t ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}">
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => setShowBookingModal(false)}
+                                    disabled={bookingLoading}
+                                    className={`flex-1 px-4 py-3 rounded-xl font-medium transition-colors ${
+                                        isDarkMode
+                                            ? 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                                            : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                                    }`}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleSubmitBooking}
+                                    disabled={bookingLoading || !bookingData.date || !bookingData.time || !bookingData.subject}
+                                    className="flex-1 px-4 py-3 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-xl font-bold shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                >
+                                    {bookingLoading ? (
+                                        <>
+                                            <Loader2 size={20} className="animate-spin" />
+                                            Booking...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Calendar size={20} />
+                                            Send Request
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}

@@ -1,0 +1,1199 @@
+import { useRef, useEffect, useState } from 'react';
+import { Send, Image, Paperclip, Phone, Video, X, Smile, FileText, Mic, Square, Check, Loader2, Clock, User, Users, Crown, Palette, Maximize2, Trash2, Minus, ArrowLeft } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { sendMessage, fetchMessages, subscribeToMessages, markNotificationsAsRead, fetchFriends, fetchGroupMessages, sendGroupMessage, fetchGroupMembers, fetchCallHistory, getTotalTalkTime, clearChatHistory } from '../utils/supabase-queries';
+import { Friend, GroupMember } from '../types';
+
+interface ChatWindowProps {
+    friend: {
+        id: string;
+        name: string;
+        avatarUrl: string;
+        status: string;
+        isGroup?: boolean; // Flag for group chat
+        isMentor?: boolean; // Flag for mentor chat (student viewing mentors only)
+    };
+    onClose: () => void;
+    onStartVideoCall: (name: string, avatar?: string, friendId?: string) => void;
+    onSelectFriend?: (friend: any) => void;
+    onMessagesRead?: () => void; // Callback to reload unread counts
+    onViewProfile?: (userId: string) => void; // Navigate to user profile
+    isDarkMode: boolean;
+    userRole?: 'student' | 'mentor';
+    isMinimized: boolean;
+    setIsMinimized: (min: boolean) => void;
+    // Header props
+    setIsDarkMode: (isDark: boolean) => void;
+    isSidebarOpen: boolean;
+    setIsSidebarOpen: (isOpen: boolean) => void;
+    currentView: string;
+    setCurrentView: (view: any) => void;
+    totalUnreadMessages: number;
+    onNotificationClick: (type: 'message' | 'call' | 'friend_request', data?: any) => void;
+    setShowSettings: (show: boolean) => void;
+    playNotificationSound?: () => void; // Play sound when receiving messages
+    playSendMessageSound?: () => void; // Play sound when sending messages
+}
+
+export function ChatWindow({
+    friend,
+    onClose,
+    onStartVideoCall,
+    onSelectFriend,
+    isDarkMode,
+    userRole,
+    setIsDarkMode,
+    isSidebarOpen,
+    setIsSidebarOpen,
+    currentView,
+    setCurrentView,
+    totalUnreadMessages,
+    onNotificationClick,
+    setShowSettings,
+    onMessagesRead,
+    onViewProfile,
+    playNotificationSound,
+    playSendMessageSound,
+    isMinimized,
+    setIsMinimized
+}: ChatWindowProps) {
+    const { user } = useAuth();
+    const [messages, setMessages] = useState<any[]>([]);
+    const [newMessage, setNewMessage] = useState('');
+    const [loading, setLoading] = useState(true);
+    const [sending, setSending] = useState(false);
+    const [isFullScreen, setIsFullScreen] = useState(true);
+    const [friends, setFriends] = useState<Friend[]>([]);
+    const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
+    const [callHistory, setCallHistory] = useState<any[]>([]);
+    const [totalTalkTime, setTotalTalkTime] = useState<number>(0);
+    const [showCallHistory, setShowCallHistory] = useState(false);
+    const [showMemberList, setShowMemberList] = useState(false);
+    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const [showAttachMenu, setShowAttachMenu] = useState(false);
+    const [uploadingFile, setUploadingFile] = useState(false);
+    const [isRecording, setIsRecording] = useState(false);
+    const [recordingTime, setRecordingTime] = useState(0);
+
+    const handleClearChat = async () => {
+        if (!user || !friend) return;
+        if (confirm('Clear chat history? This cannot be undone.')) {
+            await clearChatHistory(user.id, friend.id, friend.isGroup || false);
+            setMessages([]);
+        }
+    };
+    const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
+    const [lastSeenTime, setLastSeenTime] = useState<Date | null>(null);
+    const [chatBackground, setChatBackground] = useState<'default' | 'profile' | 'pattern'>(() => {
+        const saved = localStorage.getItem('chat_background_preference');
+        return (saved as 'default' | 'profile' | 'pattern') || 'default';
+    });
+    const [showBackgroundMenu, setShowBackgroundMenu] = useState(false);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const imageInputRef = useRef<HTMLInputElement>(null);
+    const groupPhotoInputRef = useRef<HTMLInputElement>(null);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+    // Popular emojis
+    const emojis = ['😊', '😂', '❤️', '👍', '🎉', '🔥', '✨', '💯', '🚀', '👏', '😍', '🤔', '😎', '🙌', '💪', '🎯', '📚', '✅', '⚡', '🌟'];
+
+    useEffect(() => {
+        if (!isMinimized && user && friend) {
+            console.log('[DEBUG-NOTIF] [ChatWindow.tsx] Window un-minimized or opened, marking as read');
+            markAsRead('effect-minimized');
+        }
+    }, [isMinimized, user, friend?.id]);
+
+    useEffect(() => {
+        loadFriends();
+        if (!friend.isGroup && user) {
+            loadCallHistory();
+        }
+    }, [user, friend.id]);
+
+    const loadCallHistory = async () => {
+        if (!user || friend.isGroup) return;
+        try {
+            const history = await fetchCallHistory(user.id, friend.id);
+            setCallHistory(history);
+            const totalTime = await getTotalTalkTime(user.id, friend.id);
+            setTotalTalkTime(totalTime);
+        } catch (err) {
+            console.error('Error loading call history:', err);
+        }
+    };
+
+    const formatDuration = (seconds: number) => {
+        const hrs = Math.floor(seconds / 3600);
+        const mins = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        if (hrs > 0) return `${hrs}h ${mins}m ${secs}s`;
+        if (mins > 0) return `${mins}m ${secs}s`;
+        return `${secs}s`;
+    };
+
+    const formatTotalTime = (seconds: number) => {
+        const hrs = Math.floor(seconds / 3600);
+        const mins = Math.floor((seconds % 3600) / 60);
+        if (hrs > 0) return `${hrs}h ${mins}m`;
+        if (mins > 0) return `${mins}m`;
+        return `< 1m`;
+    };
+
+    const loadFriends = async () => {
+        if (!user) return;
+        try {
+            const data = await fetchFriends(user.id);
+            setFriends(data || []);
+        } catch (err) {
+            console.error('Error loading friends:', err);
+        }
+    };
+
+    useEffect(() => {
+        if (user && friend) {
+            loadMessages();
+            if (!isMinimized) markAsRead('effect-mount');
+            // Set initial last seen time to now (recipient seeing messages when chat opens)
+            setLastSeenTime(new Date());
+
+            if (friend.isGroup) {
+                loadGroupMembers();
+            }
+
+            const subscription = subscribeToMessages(user.id, (msg) => {
+                // If it's a group message, check if it belongs to this group
+                if (friend.isGroup) {
+                    if (msg.group_id === friend.id) {
+                        // We need to fetch the sender details for the new message to display correctly
+                        // For now, just reload or append with placeholder
+                        // Ideally, we fetch the sender profile or have it in cache
+                        setMessages(prev => [...prev, msg]);
+                        // Play sound for received message
+                        playNotificationSound?.();
+                    }
+                } else {
+                    if (msg.sender_id === friend.id) {
+                        setMessages(prev => [...prev, msg]);
+                        if (!isMinimized) markAsRead('subscription');
+                        // When recipient sends a message, it means they've seen our previous messages
+                        setLastSeenTime(new Date());
+                        // Play sound for received message
+                        playNotificationSound?.();
+                    }
+                }
+            });
+            return () => {
+                subscription.unsubscribe();
+            };
+        }
+    }, [user, friend.id, isMinimized]);
+
+    const markAsRead = async (source: string = 'manual') => {
+        if (!user || !friend) return;
+        console.log(`[DEBUG-NOTIF] [ChatWindow.tsx] markAsRead triggered from [${source}] for friend:`, friend.id, 'isGroup:', friend.isGroup);
+        if (friend.isGroup) {
+            // Mark group notifications as read using groupId
+            await markNotificationsAsRead(user.id, '', 'message', friend.id);
+        } else {
+            // Mark individual friend notifications as read
+            await markNotificationsAsRead(user.id, friend.id);
+        }
+        // Notify parent to reload unread counts
+        onMessagesRead?.();
+    };
+
+    const loadGroupMembers = async () => {
+        if (friend.isGroup) {
+            const members = await fetchGroupMembers(friend.id);
+            setGroupMembers(members);
+        }
+    }
+
+    useEffect(() => {
+        scrollToBottom();
+    }, [messages]);
+
+    // Persist chat background preference
+    useEffect(() => {
+        localStorage.setItem('chat_background_preference', chatBackground);
+    }, [chatBackground]);
+
+    const loadMessages = async () => {
+        if (!user || !friend) return;
+        setLoading(true);
+        try {
+            let data = [];
+            if (friend.isGroup) {
+                data = await fetchGroupMessages(friend.id);
+            } else {
+                data = await fetchMessages(user.id, friend.id);
+            }
+            setMessages(data || []);
+        } catch (err) {
+            console.error('Error loading messages:', err);
+            setMessages([]);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    };
+
+    const handleFileUpload = async (file: File, type: 'file' | 'image') => {
+        if (!user || !friend.id || uploadingFile) return;
+
+        setUploadingFile(true);
+        try {
+            // Upload file to Supabase storage
+            const { supabase } = await import('../utils/supabase');
+            const fileExt = file.name.split('.').pop();
+            const fileName = `${Math.random()}.${fileExt}`;
+            const filePath = `chat-files/${fileName}`;
+
+            const { error: uploadError } = await supabase.storage
+                .from('profiles')
+                .upload(filePath, file);
+
+            if (uploadError) throw uploadError;
+
+            const { data: { publicUrl } } = supabase.storage
+                .from('profiles')
+                .getPublicUrl(filePath);
+
+            // Send message with file URL
+            const messageContent = type === 'image'
+                ? `📷 Image: ${file.name}\n${publicUrl}`
+                : `📎 File: ${file.name}\n${publicUrl}`;
+
+            if (friend.isGroup) {
+                await sendGroupMessage(friend.id, user.id, messageContent);
+            } else {
+                console.log('[DEBUG-NOTIF] [ChatWindow.tsx] handleFileUpload: Calling sendMessage for DM');
+                await sendMessage(user.id, friend.id, messageContent);
+            }
+
+            await loadMessages();
+            // Play sound for sent message
+            playSendMessageSound?.();
+        } catch (error) {
+            console.error('Error uploading file:', error);
+            alert('Failed to upload file. Please try again.');
+        } finally {
+            setUploadingFile(false);
+            setShowAttachMenu(false);
+        }
+    };
+
+    const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file && file.type.startsWith('image/')) {
+            handleFileUpload(file, 'image');
+        }
+    };
+
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            handleFileUpload(file, 'file');
+        }
+    };
+
+    const startRecording = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const mediaRecorder = new MediaRecorder(stream);
+            mediaRecorderRef.current = mediaRecorder;
+            const chunks: Blob[] = [];
+
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) {
+                    chunks.push(e.data);
+                }
+            };
+
+            mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(chunks, { type: 'audio/webm' });
+                await handleVoiceUpload(audioBlob);
+                stream.getTracks().forEach(track => track.stop());
+                setAudioChunks([]);
+                setRecordingTime(0);
+            };
+
+            mediaRecorder.start();
+            setIsRecording(true);
+            setRecordingTime(0);
+
+            // Start timer
+            recordingIntervalRef.current = setInterval(() => {
+                setRecordingTime(prev => prev + 1);
+            }, 1000);
+        } catch (error) {
+            console.error('Error starting recording:', error);
+            alert('Failed to access microphone. Please allow microphone access.');
+        }
+    };
+
+    const stopRecording = () => {
+        if (mediaRecorderRef.current && isRecording) {
+            mediaRecorderRef.current.stop();
+            setIsRecording(false);
+            if (recordingIntervalRef.current) {
+                clearInterval(recordingIntervalRef.current);
+                recordingIntervalRef.current = null;
+            }
+        }
+    };
+
+    const handleVoiceUpload = async (audioBlob: Blob) => {
+        if (!user || !friend.id || uploadingFile) return;
+
+        setUploadingFile(true);
+        try {
+            const { supabase } = await import('../utils/supabase');
+            const fileName = `voice_${Date.now()}.webm`;
+            const filePath = `chat-files/${fileName}`;
+
+            const { error: uploadError } = await supabase.storage
+                .from('profiles')
+                .upload(filePath, audioBlob);
+
+            if (uploadError) throw uploadError;
+
+            const { data: { publicUrl } } = supabase.storage
+                .from('profiles')
+                .getPublicUrl(filePath);
+
+            // Send message with voice URL
+            const messageContent = `🎤 Voice message (${recordingTime}s)\n${publicUrl}`;
+
+            if (friend.isGroup) {
+                await sendGroupMessage(friend.id, user.id, messageContent);
+            } else {
+                console.log('[DEBUG-NOTIF] [ChatWindow.tsx] handleVoiceUpload: Calling sendMessage for DM');
+                await sendMessage(user.id, friend.id, messageContent);
+            }
+
+            await loadMessages();
+            // Play sound for sent message
+            playSendMessageSound?.();
+        } catch (error) {
+            console.error('Error uploading voice message:', error);
+            alert('Failed to upload voice message. Please try again.');
+        } finally {
+            setUploadingFile(false);
+        }
+    };
+
+    useEffect(() => {
+        return () => {
+            if (recordingIntervalRef.current) {
+                clearInterval(recordingIntervalRef.current);
+            }
+            if (mediaRecorderRef.current) {
+                mediaRecorderRef.current.stop();
+            }
+        };
+    }, []);
+
+    const handleSend = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!user || !friend.id || !newMessage.trim() || sending) return;
+
+        const contentToSend = newMessage.trim();
+        console.log('[handleSend] Sending message to:', friend.id, 'Content:', contentToSend);
+
+        setSending(true);
+        try {
+            let error;
+            if (friend.isGroup) {
+                console.log('[DEBUG-NOTIF] [ChatWindow.tsx] handleSend: Calling sendGroupMessage');
+                const res = await sendGroupMessage(friend.id, user.id, contentToSend);
+                error = res.error;
+            } else {
+                console.log('[DEBUG-NOTIF] [ChatWindow.tsx] handleSend: Calling sendMessage for DM');
+                const res = await sendMessage(user.id, friend.id, contentToSend);
+                error = res.error;
+            }
+
+            if (error) {
+                console.error('ChatWindow: Error sending message:', error);
+                alert(`Failed to send message: ${error.message || 'Unknown error'}`);
+            } else {
+                const msg = {
+                    id: `temp-${Date.now()}`,
+                    sender_id: user.id,
+                    receiver_id: friend.isGroup ? null : friend.id,
+                    group_id: friend.isGroup ? friend.id : null,
+                    content: contentToSend,
+                    created_at: new Date().toISOString(),
+                    senderName: user.user_metadata?.full_name, // Optimistic update
+                    senderAvatar: user.user_metadata?.avatar_url
+                };
+                setMessages(prev => [...prev, msg]);
+                setNewMessage('');
+
+                // Play sound for sent message
+                playSendMessageSound?.();
+
+                // For groups, we rely on Supabase Realtime or triggers to notify members (complex for now, skipping direct notification creation from client for all members)
+            }
+        } catch (err) {
+            console.error('ChatWindow: Unexpected error sending message:', err);
+        } finally {
+            setSending(false);
+        }
+    };
+
+
+
+    // --- EARLY RETURN FOR MINIMIZED STATE ---
+    // This ensures the chat window doesn't block the screen when minimized
+    if (isMinimized) {
+        return (
+            <div
+                className={`fixed bottom-24 right-6 w-80 rounded-2xl shadow-2xl border-2 overflow-hidden z-[60] transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
+                style={{ height: 'auto' }}
+            >
+                <div
+                    className="p-4 flex items-center justify-between cursor-pointer bg-gradient-to-r from-amber-500 to-orange-600 text-white"
+                    onClick={() => setIsMinimized(false)}
+                >
+                    <div className="flex items-center gap-3">
+                        <div className="relative">
+                            <img src={friend.avatarUrl} alt="" className="w-10 h-10 rounded-full object-cover border-2 border-white/20 shadow-sm" />
+                            {!friend.isGroup && (
+                                <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-amber-500 ${friend.status === 'online' ? 'bg-green-500' : 'bg-slate-400'}`} />
+                            )}
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-sm font-bold truncate max-w-[120px]">{friend.name}</span>
+                            <span className="text-[10px] opacity-80 font-medium">Click to expand chat</span>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setIsMinimized(false); }}
+                            className="p-2 hover:bg-white/20 rounded-lg transition-all"
+                            title="Maximize"
+                        >
+                            <Maximize2 size={16} />
+                        </button>
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onClose(); }}
+                            className="p-2 hover:bg-white/20 rounded-lg transition-all"
+                            title="Close"
+                        >
+                            <X size={16} />
+                        </button>
+                    </div>
+                </div>
+                {totalTalkTime > 0 && (
+                    <div className={`px-4 py-2 border-t ${isDarkMode ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-100'} flex items-center justify-between`}>
+                        <span className="text-[10px] uppercase tracking-wider font-bold opacity-60">Session Time</span>
+                        <span className="text-xs font-mono font-bold text-amber-500">{formatTotalTime(totalTalkTime)}</span>
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    return (
+        <div className={`fixed inset-0 z-[50] flex flex-col h-screen w-screen ${isDarkMode ? 'bg-slate-900' : 'bg-slate-50'}`}>
+
+            <div className={`flex-1 flex flex-col overflow-hidden min-h-0`}>
+                <div className={`flex flex-1 min-h-0 overflow-hidden ${isDarkMode ? 'bg-slate-800' : 'bg-white'}`}>
+
+                    {/* Sidebar - Friends or Group Members */}
+                    {isFullScreen && (
+                        <div className={`w-64 border-r flex flex-col ${isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-slate-50/50'}`}>
+                            <div className="p-4 border-b border-inherit flex items-center justify-between">
+                                <h3 className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                                    {friend.isGroup ? `Group Members (${groupMembers.length})` : friend.isMentor ? 'Mentors' : 'Messages'}
+                                </h3>
+                                <button
+                                    onClick={() => setIsFullScreen(false)}
+                                    className={`p-1 rounded-lg transition-all ${isDarkMode ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-200 text-slate-600'}`}
+                                    title="Close Sidebar"
+                                >
+                                    <X size={18} />
+                                </button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
+                                {friend.isGroup ? (
+                                    groupMembers.map(m => {
+                                        const isAdmin = m.role?.toLowerCase() === 'admin';
+                                        return (
+                                            <button
+                                                key={m.userId}
+                                                onClick={() => onViewProfile?.(m.userId)}
+                                                className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all hover:scale-[1.02] ${isDarkMode ? 'hover:bg-slate-800' : 'hover:bg-white hover:shadow-sm'} ${isAdmin ? 'bg-amber-500/10 border border-amber-500/30' : ''}`}
+                                            >
+                                                <div className="relative">
+                                                    <img
+                                                        src={(m.profile as any)?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent((m.profile as any)?.full_name || 'U')}&background=random`}
+                                                        alt=""
+                                                        className={`w-10 h-10 rounded-full object-cover border-2 ${isAdmin ? 'border-amber-500' : 'border-slate-500/30'}`}
+                                                    />
+                                                    {isAdmin && (
+                                                        <div className="absolute -top-1 -right-1 bg-gradient-to-r from-amber-500 to-orange-500 rounded-full p-0.5">
+                                                            <Crown size={10} className="text-white fill-white" />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div className="flex-1 min-w-0 text-left">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <p className={`font-bold text-sm truncate ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                                                            {(m.profile as any)?.full_name || 'Unknown'}
+                                                        </p>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <p className={`text-xs truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                            @{(m.profile as any)?.username || 'unknown'}
+                                                        </p>
+                                                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${isAdmin ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white' : isDarkMode ? 'bg-slate-700 text-slate-400' : 'bg-slate-200 text-slate-500'}`}>
+                                                            {isAdmin ? '👑 ADMIN' : 'MEMBER'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </button>
+                                        );
+                                    })
+                                ) : (
+                                    (friend.isMentor ? friends.filter(f => f.role === 'mentor') : friends).map(f => (
+                                        <div
+                                            key={f.id}
+                                            className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${f.id === friend.id
+                                                ? 'bg-amber-500 text-white shadow-md'
+                                                : isDarkMode
+                                                    ? 'text-slate-300 hover:bg-slate-800'
+                                                    : 'text-slate-600 hover:bg-white hover:shadow-sm'
+                                                }`}
+                                        >
+                                            <button
+                                                onClick={() => onViewProfile?.(f.id)}
+                                                className="relative"
+                                            >
+                                                <img src={f.avatarUrl} alt="" className="w-10 h-10 rounded-full object-cover" />
+                                                <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 ${f.status === 'online' ? 'bg-green-500' : 'bg-slate-400'
+                                                    } ${isDarkMode ? 'border-slate-900' : 'border-white'}`} />
+                                            </button>
+                                            <button
+                                                onClick={() => onSelectFriend?.({ ...f, isMentor: friend.isMentor })}
+                                                className="text-left overflow-hidden flex-1"
+                                            >
+                                                <p className="font-bold text-sm truncate">{f.name}</p>
+                                                <p className={`text-xs truncate ${f.id === friend.id ? 'text-white/80' : 'opacity-60'}`}>
+                                                    {f.status === 'online' ? 'Active Now' : `@${f.username || 'unknown'}`}
+                                                </p>
+                                            </button>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Chat Area */}
+                    <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
+                        {/* Hidden input for group photo */}
+                        {friend.isGroup && (
+                            <input
+                                type="file"
+                                ref={groupPhotoInputRef}
+                                accept="image/*"
+                                className="hidden"
+                                onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    try {
+                                        const { supabase } = await import('../utils/supabase');
+                                        const fileExt = file.name.split('.').pop();
+                                        const fileName = `group_${friend.id}.${fileExt}`;
+                                        const filePath = `avatars/${fileName}`;
+
+                                        await supabase.storage.from('profiles').upload(filePath, file, { upsert: true });
+                                        const { data: { publicUrl } } = supabase.storage.from('profiles').getPublicUrl(filePath);
+
+                                        await supabase.from('groups').update({ avatar_url: publicUrl }).eq('id', friend.id);
+                                        alert('Group photo updated! Refresh to see changes.');
+                                    } catch (err) {
+                                        console.error('Error updating group photo:', err);
+                                        alert('Failed to update group photo.');
+                                    }
+                                }}
+                            />
+                        )}
+                        {/* Header */}
+                        <div className="p-4 flex items-center justify-between bg-gradient-to-r from-amber-500 to-orange-600 text-white shrink-0">
+                            <div className="flex items-center gap-3 flex-1">
+                                <button
+                                    onClick={onClose}
+                                    className="p-2 hover:bg-white/20 rounded-lg transition-all"
+                                    title="Back"
+                                >
+                                    <ArrowLeft size={20} />
+                                </button>
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        friend.isGroup && groupPhotoInputRef.current?.click();
+                                    }}
+                                    className={`relative group ${friend.isGroup ? 'cursor-pointer' : ''}`}
+                                    title={friend.isGroup ? 'Click to change group photo' : ''}
+                                >
+                                    <img src={friend.avatarUrl} alt="" className="w-10 h-10 rounded-full object-cover border-2 border-white/20" />
+                                    {friend.isGroup && (
+                                        <div className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                            <span className="text-[8px] font-bold">CHANGE</span>
+                                        </div>
+                                    )}
+                                    {!friend.isGroup && (
+                                        <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-amber-500 ${friend.status === 'online' ? 'bg-green-500' : 'bg-slate-400'}`} />
+                                    )}
+                                </button>
+                                <div>
+                                    <h3 className="font-bold text-sm leading-tight text-white">{friend.name}</h3>
+                                    <p className="text-[10px] opacity-80 uppercase tracking-wider font-bold text-white/90">
+                                        {friend.isGroup ? (
+                                            <span className="flex items-center gap-1">
+                                                <Users size={12} />
+                                                Group Chat
+                                            </span>
+                                        ) : (
+                                            <span className="flex items-center gap-1">
+                                                @{(friend as any).username || 'unknown'}
+                                                {friend.status === 'online' && <span className="ml-1 w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />}
+                                            </span>
+                                        )}
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 relative">
+                                <button
+                                    onClick={handleClearChat}
+                                    className="p-2 hover:bg-white/10 rounded-lg transition-all text-white/80 hover:text-white"
+                                    title="Clear Chat"
+                                >
+                                    <Trash2 size={18} />
+                                </button>
+                                {friend.isGroup && (
+                                    <>
+                                        {/* Member List Dropdown */}
+                                        {showMemberList && (
+                                            <div className={`absolute top-12 right-0 w-72 rounded-xl shadow-2xl border z-50 max-h-80 overflow-y-auto ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
+                                                <div className={`p-3 border-b sticky top-0 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
+                                                    <h4 className="font-bold text-sm flex items-center gap-2">
+                                                        <Users size={16} className="text-amber-500" />
+                                                        Group Members ({groupMembers.length})
+                                                    </h4>
+                                                </div>
+                                                <div className={isDarkMode ? 'divide-y divide-slate-800' : 'divide-y divide-slate-200'}>
+                                                    {groupMembers.map((member: any) => (
+                                                        <div key={member.user_id} className={`p-3 transition-all ${isDarkMode ? 'hover:bg-white/5' : 'hover:bg-slate-50'}`}>
+                                                            <div className="flex items-center gap-3">
+                                                                <img
+                                                                    src={(member as any).avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent((member as any).full_name || 'User')}
+                                                                    alt={(member as any).full_name}
+                                                                    className="w-10 h-10 rounded-full object-cover"
+                                                                />
+                                                                <div className="flex-1 min-w-0">
+                                                                    <div className="flex items-center gap-1.5">
+                                                                        <p className={`font-bold text-sm truncate ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{(member as any).full_name}</p>
+                                                                        {member.role?.toLowerCase() === 'admin' && (
+                                                                            <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-full font-bold shadow-sm">
+                                                                                <Crown size={10} className="fill-white" />
+                                                                                Admin
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    <p className="text-xs text-slate-500">@{member.username}</p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                        <button
+                                            onClick={() => onStartVideoCall(friend.name, friend.avatarUrl, friend.id)}
+                                            className="p-2 hover:bg-white/10 rounded-lg transition-all"
+                                            title="Start Group Video Call"
+                                        >
+                                            <Video size={18} />
+                                        </button>
+                                        <button
+                                            onClick={() => setShowCallHistory(!showCallHistory)}
+                                            className="p-2 hover:bg-white/10 rounded-lg transition-all"
+                                            title="Group Call History"
+                                        >
+                                            <Clock size={18} />
+                                        </button>
+                                    </>
+                                )}
+                                {!friend.isGroup && (
+                                    <>
+                                        <div className="relative">
+                                            <button
+                                                onClick={() => setShowCallHistory(!showCallHistory)}
+                                                className="p-2 hover:bg-white/10 rounded-lg transition-all relative"
+                                                title={`Total talk time: ${formatTotalTime(totalTalkTime)}`}
+                                            >
+                                                <Clock size={18} />
+                                                {totalTalkTime > 0 && (
+                                                    <span className="absolute -top-1 -right-1 bg-amber-500 text-white text-[9px] font-bold px-1 rounded">
+                                                        {formatTotalTime(totalTalkTime)}
+                                                    </span>
+                                                )}
+                                            </button>
+                                            {showCallHistory && callHistory.length > 0 && (
+                                                <div className={`absolute top-12 right-0 w-64 rounded-xl shadow-2xl border z-50 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
+                                                    <div className="p-3 border-b border-slate-700">
+                                                        <h4 className="font-bold text-sm">Call History</h4>
+                                                        <p className="text-xs opacity-70">Total: {formatTotalTime(totalTalkTime)}</p>
+                                                    </div>
+                                                    <div className="max-h-48 overflow-y-auto">
+                                                        {callHistory.map((call: any) => (
+                                                            <div key={call.id} className="p-2 border-b border-slate-800/50 hover:bg-white/5">
+                                                                <div className="flex items-center justify-between text-xs">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <Phone size={12} className={call.caller_id === user?.id ? 'text-green-500' : 'text-blue-500'} />
+                                                                        <span className="opacity-70">
+                                                                            {call.caller_id === user?.id ? 'Outgoing' : 'Incoming'}
+                                                                        </span>
+                                                                    </div>
+                                                                    <span className="font-mono font-bold text-amber-500">
+                                                                        {formatDuration(call.duration_seconds)}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="text-[10px] opacity-50 mt-1">
+                                                                    {new Date(call.created_at).toLocaleString()}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <button
+                                            onClick={() => onStartVideoCall(friend.name, friend.avatarUrl, friend.id)}
+                                            className="p-2 hover:bg-white/10 rounded-lg transition-all"
+                                            title="Start Video Call"
+                                        >
+                                            <Video size={18} />
+                                        </button>
+                                    </>
+                                )}
+                                {/* Background Options */}
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setShowBackgroundMenu(!showBackgroundMenu)}
+                                        className="p-2 hover:bg-white/10 rounded-lg transition-all"
+                                        title="Change Background"
+                                    >
+                                        <Palette size={18} />
+                                    </button>
+                                    {showBackgroundMenu && (
+                                        <div className={`absolute top-12 right-0 w-56 rounded-xl shadow-2xl border z-50 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
+                                            <div className={`p-3 border-b ${isDarkMode ? 'border-slate-700' : 'border-slate-200'}`}>
+                                                <h4 className={`font-bold text-sm flex items-center gap-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                                                    <Palette size={16} className="text-amber-500" />
+                                                    Chat Background
+                                                </h4>
+                                            </div>
+                                            <div className="p-2 space-y-1">
+                                                <button
+                                                    onClick={() => { setChatBackground('default'); setShowBackgroundMenu(false); }}
+                                                    className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all ${chatBackground === 'default' ? 'bg-amber-500/20 border border-amber-500' : isDarkMode ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
+                                                >
+                                                    <div className={`w-10 h-10 rounded-lg ${isDarkMode ? 'bg-slate-950' : 'bg-slate-50'} border ${isDarkMode ? 'border-slate-700' : 'border-slate-300'}`} />
+                                                    <div className="text-left">
+                                                        <p className={`text-sm font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Default</p>
+                                                        <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Solid color</p>
+                                                    </div>
+                                                    {chatBackground === 'default' && <Check size={16} className="ml-auto text-amber-500" />}
+                                                </button>
+                                                <button
+                                                    onClick={() => { setChatBackground('profile'); setShowBackgroundMenu(false); }}
+                                                    className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all ${chatBackground === 'profile' ? 'bg-amber-500/20 border border-amber-500' : isDarkMode ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
+                                                >
+                                                    <img src={friend.avatarUrl} alt="" className="w-10 h-10 rounded-lg object-cover" />
+                                                    <div className="text-left">
+                                                        <p className={`text-sm font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{friend.isGroup ? 'Group Photo' : 'Profile Photo'}</p>
+                                                        <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Blurred background</p>
+                                                    </div>
+                                                    {chatBackground === 'profile' && <Check size={16} className="ml-auto text-amber-500" />}
+                                                </button>
+                                                <button
+                                                    onClick={() => { setChatBackground('pattern'); setShowBackgroundMenu(false); }}
+                                                    className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all ${chatBackground === 'pattern' ? 'bg-amber-500/20 border border-amber-500' : isDarkMode ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
+                                                >
+                                                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center">
+                                                        <div className="grid grid-cols-2 gap-0.5">
+                                                            <div className="w-2 h-2 rounded-full bg-purple-500/50" />
+                                                            <div className="w-2 h-2 rounded-full bg-pink-500/50" />
+                                                            <div className="w-2 h-2 rounded-full bg-amber-500/50" />
+                                                            <div className="w-2 h-2 rounded-full bg-blue-500/50" />
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-left">
+                                                        <p className={`text-sm font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Pattern</p>
+                                                        <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Decorative pattern</p>
+                                                    </div>
+                                                    {chatBackground === 'pattern' && <Check size={16} className="ml-auto text-amber-500" />}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                                <button
+                                    onClick={() => setIsMinimized(!isMinimized)}
+                                    className="p-2 hover:bg-white/10 rounded-lg transition-all"
+                                    title={isMinimized ? "Restore" : "Minimize"}
+                                >
+                                    {isMinimized ? <Maximize2 size={18} /> : <Minus size={18} />}
+                                </button>
+                                <button
+                                    onClick={() => setIsFullScreen(!isFullScreen)}
+                                    className="p-2 hover:bg-white/10 rounded-lg transition-all"
+                                    title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
+                                >
+                                    <Maximize2 size={18} />
+                                </button>
+                                <button
+                                    onClick={onClose}
+                                    className="p-2 hover:bg-white/10 rounded-lg transition-all"
+                                    title="Close Chat"
+                                >
+                                    <X size={18} />
+                                </button>
+                            </div>
+                        </div>
+
+                        {!isMinimized && (
+                            <>
+
+                                {/* Messages Container with Fixed Background */}
+                                <div
+                                    className={`flex-1 overflow-hidden relative ${chatBackground === 'default'
+                                        ? isDarkMode ? 'bg-slate-950/50' : 'bg-slate-50'
+                                        : ''
+                                        }`}
+                                    style={chatBackground === 'profile' ? {
+                                        backgroundImage: friend.avatarUrl ? `url(${friend.avatarUrl})` : 'none',
+                                        backgroundSize: 'cover',
+                                        backgroundPosition: 'center',
+                                        backgroundRepeat: 'no-repeat',
+                                    } : chatBackground === 'pattern' ? {
+                                        backgroundImage: isDarkMode
+                                            ? 'radial-gradient(circle at 25% 25%, rgba(251,191,36,0.1) 0%, transparent 50%), radial-gradient(circle at 75% 75%, rgba(168,85,247,0.1) 0%, transparent 50%)'
+                                            : 'radial-gradient(circle at 25% 25%, rgba(251,191,36,0.15) 0%, transparent 50%), radial-gradient(circle at 75% 75%, rgba(168,85,247,0.15) 0%, transparent 50%)',
+                                        backgroundColor: isDarkMode ? 'rgb(2,6,23)' : 'rgb(248,250,252)'
+                                    } : undefined}
+                                >
+                                    {/* Overlay for profile background */}
+                                    {chatBackground === 'profile' && (
+                                        <div className={`absolute inset-0 ${isDarkMode ? 'bg-slate-950/50' : 'bg-white/50'}`} />
+                                    )}
+                                    {/* Scrollable Messages Area */}
+                                    <div className="absolute inset-0 overflow-y-auto p-4 custom-scrollbar">
+                                        <div className="relative z-10 flex flex-col min-h-full">
+                                            {loading ? (
+                                                <div className="h-full flex flex-col items-center justify-center opacity-50">
+                                                    <Loader2 className="w-8 h-8 text-amber-500 animate-spin mb-2" />
+                                                    <p className="text-xs">Loading history...</p>
+                                                </div>
+                                            ) : messages.length > 0 ? (
+                                                messages.map((msg, idx) => {
+                                                    const isMe = msg.sender_id === user?.id;
+                                                    const msgContent = msg.content || '';
+                                                    const isVoiceMessage = msgContent.includes('🎤 Voice message');
+                                                    const isImageMessage = msgContent.includes('📷 Image:');
+                                                    const isFileMessage = msgContent.includes('📎 File:');
+
+                                                    // Check if this is a consecutive message from the same sender
+                                                    const prevMsg = idx > 0 ? messages[idx - 1] : null;
+                                                    const isConsecutive = prevMsg && prevMsg.sender_id === msg.sender_id;
+                                                    const showSenderName = !isMe && !isConsecutive;
+
+                                                    let displayContent = msgContent;
+                                                    let fileUrl = '';
+
+                                                    if (isVoiceMessage || isImageMessage || isFileMessage) {
+                                                        const lines = msgContent.split('\n');
+                                                        displayContent = lines[0];
+                                                        fileUrl = lines[1] || '';
+                                                    }
+
+                                                    return (
+                                                        <div key={idx} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} ${isConsecutive ? 'mt-1' : 'mt-3'}`}>
+                                                            {showSenderName && (
+                                                                <span className={`text-[10px] mb-1 ml-1 font-semibold ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`}>
+                                                                    @{msg.senderUsername || (friend as any).username || 'unknown'}
+                                                                </span>
+                                                            )}
+                                                            {isMe && !isConsecutive && (
+                                                                <span className={`text-[10px] mb-1 mr-1 font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                                    You
+                                                                </span>
+                                                            )}
+                                                            <div className={`max-w-[80%] rounded-2xl text-sm shadow-lg ${isMe
+                                                                ? 'bg-gradient-to-br from-amber-500 to-orange-500 text-white rounded-tr-none'
+                                                                : isDarkMode
+                                                                    ? 'bg-slate-800 text-white rounded-tl-none border border-slate-700'
+                                                                    : 'bg-white text-slate-800 rounded-tl-none border border-slate-200 shadow-md'
+                                                                } ${(isImageMessage || isFileMessage || isVoiceMessage) ? 'p-2' : 'p-3'}`}>
+                                                                {isVoiceMessage && fileUrl ? (
+                                                                    <div className={`flex flex-col gap-2 p-3 rounded-xl ${isMe ? 'bg-white/10' : isDarkMode ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <div className={`p-2 rounded-full ${isMe ? 'bg-white/20' : 'bg-purple-500'}`}>
+                                                                                <Mic size={16} className="text-white" />
+                                                                            </div>
+                                                                            <span className={`text-xs font-semibold ${isMe ? 'text-white' : isDarkMode ? 'text-white' : 'text-slate-700'}`}>
+                                                                                Voice Message
+                                                                            </span>
+                                                                        </div>
+                                                                        <audio
+                                                                            controls
+                                                                            className="w-full min-w-[200px] h-10"
+                                                                        >
+                                                                            <source src={fileUrl} type="audio/webm" />
+                                                                        </audio>
+                                                                    </div>
+                                                                ) : isImageMessage && fileUrl ? (
+                                                                    <div className="flex flex-col gap-1">
+                                                                        <img
+                                                                            src={fileUrl}
+                                                                            alt="Shared image"
+                                                                            className="max-w-full rounded-xl object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                                                                            style={{ maxHeight: '280px', minWidth: '150px' }}
+                                                                            onClick={() => window.open(fileUrl, '_blank')}
+                                                                        />
+                                                                        <span className={`text-[11px] px-1 ${isMe ? 'text-white/80' : isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                                            📷 {displayContent.replace('📷 Image:', '').trim()}
+                                                                        </span>
+                                                                    </div>
+                                                                ) : isFileMessage && fileUrl ? (
+                                                                    <a
+                                                                        href={fileUrl}
+                                                                        target="_blank"
+                                                                        rel="noopener noreferrer"
+                                                                        className={`flex items-center gap-3 p-3 rounded-xl transition-all ${isMe
+                                                                            ? 'bg-white/15 hover:bg-white/25'
+                                                                            : isDarkMode
+                                                                                ? 'bg-slate-700 hover:bg-slate-600'
+                                                                                : 'bg-slate-100 hover:bg-slate-200'
+                                                                            }`}
+                                                                    >
+                                                                        <div className={`p-2.5 rounded-lg ${isMe ? 'bg-white/20' : 'bg-blue-500'}`}>
+                                                                            <FileText size={20} className="text-white" />
+                                                                        </div>
+                                                                        <div className="flex-1 min-w-0">
+                                                                            <p className={`text-sm font-semibold truncate ${isMe ? 'text-white' : isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                                                                                {displayContent.replace('📎 File:', '').trim()}
+                                                                            </p>
+                                                                            <p className={`text-[10px] ${isMe ? 'text-white/70' : isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                                                Tap to open
+                                                                            </p>
+                                                                        </div>
+                                                                    </a>
+                                                                ) : (
+                                                                    <span className={`whitespace-pre-wrap break-words ${isMe ? 'text-white' : isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                                                                        {displayContent}
+                                                                    </span>
+                                                                )}
+                                                                <div className={`flex items-center gap-1 mt-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                                                    <p className={`text-[10px] ${isMe ? 'text-white/70' : 'opacity-60'}`}>
+                                                                        {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                                    </p>
+                                                                    {isMe && (
+                                                                        <div className="flex items-center ml-1">
+                                                                            {msg.id.startsWith('temp-') ? (
+                                                                                <Clock size={12} className="text-white/60" />
+                                                                            ) : null}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })
+                                            ) : (
+                                                <div className="h-full flex flex-col items-center justify-center text-center opacity-50 px-6">
+                                                    <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center mb-3">
+                                                        {friend.isGroup ? <Users size={24} className="text-slate-600" /> : <User size={24} className="text-slate-600" />}
+                                                    </div>
+                                                    <p className="text-xs font-medium">No messages yet</p>
+                                                    <p className="text-[10px] mt-1">Start a conversation with {friend.name}!</p>
+                                                </div>
+                                            )}
+                                            <div ref={messagesEndRef} />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Input */}
+                                <form onSubmit={handleSend} className={`p-4 border-t shrink-0 relative ${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'
+                                    }`}>
+                                    {/* Hidden file inputs */}
+                                    <input
+                                        ref={imageInputRef}
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={handleImageSelect}
+                                        className="hidden"
+                                    />
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept=".pdf,.doc,.docx,.txt"
+                                        onChange={handleFileSelect}
+                                        className="hidden"
+                                    />
+
+                                    {/* Emoji Picker */}
+                                    {showEmojiPicker && (
+                                        <div className={`absolute bottom-20 left-4 p-3 rounded-xl shadow-2xl border z-50 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
+                                            <div className="grid grid-cols-10 gap-2">
+                                                {emojis.map((emoji, idx) => (
+                                                    <button
+                                                        key={idx}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setNewMessage(prev => prev + emoji);
+                                                            setShowEmojiPicker(false);
+                                                        }}
+                                                        className="text-2xl hover:bg-slate-800/50 rounded p-1 transition-all"
+                                                    >
+                                                        {emoji}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Attach Menu */}
+                                    {showAttachMenu && (
+                                        <div className={`absolute bottom-20 left-16 p-2 rounded-xl shadow-2xl border z-50 ${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    imageInputRef.current?.click();
+                                                    setShowAttachMenu(false);
+                                                }}
+                                                className={`flex items-center gap-3 w-full p-3 rounded-lg transition-all ${isDarkMode ? 'hover:bg-slate-800' : 'hover:bg-slate-50'}`}
+                                            >
+                                                <div className="p-2 bg-purple-500 rounded-lg">
+                                                    <Image size={18} className="text-white" />
+                                                </div>
+                                                <div className="text-left">
+                                                    <p className={`font-bold text-sm ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Image</p>
+                                                    <p className="text-xs text-slate-500">Share photos</p>
+                                                </div>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    fileInputRef.current?.click();
+                                                    setShowAttachMenu(false);
+                                                }}
+                                                className={`flex items-center gap-3 w-full p-3 rounded-lg transition-all ${isDarkMode ? 'hover:bg-slate-800' : 'hover:bg-slate-50'}`}
+                                            >
+                                                <div className="p-2 bg-blue-500 rounded-lg">
+                                                    <FileText size={18} className="text-white" />
+                                                </div>
+                                                <div className="text-left">
+                                                    <p className={`font-bold text-sm ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Document</p>
+                                                    <p className="text-xs text-slate-500">PDF, DOC, TXT</p>
+                                                </div>
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    <div className="flex gap-2 items-center">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setShowEmojiPicker(!showEmojiPicker);
+                                                setShowAttachMenu(false);
+                                            }}
+                                            className={`p-2 rounded-xl transition-all ${isDarkMode ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-100 text-slate-600'}`}
+                                            title="Add Emoji"
+                                        >
+                                            <Smile size={20} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setShowAttachMenu(!showAttachMenu);
+                                                setShowEmojiPicker(false);
+                                            }}
+                                            disabled={uploadingFile}
+                                            className={`p-2 rounded-xl transition-all ${uploadingFile ? 'opacity-50' : ''} ${isDarkMode ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-100 text-slate-600'}`}
+                                            title="Attach File"
+                                        >
+                                            {uploadingFile ? <Loader2 size={20} className="animate-spin" /> : <Paperclip size={20} />}
+                                        </button>
+                                        {!isRecording ? (
+                                            <button
+                                                type="button"
+                                                onClick={startRecording}
+                                                disabled={uploadingFile}
+                                                className={`p-2 rounded-xl transition-all ${uploadingFile ? 'opacity-50' : ''} ${isDarkMode ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-slate-100 text-slate-600'}`}
+                                                title="Record Voice Message"
+                                            >
+                                                <Mic size={20} />
+                                            </button>
+                                        ) : (
+                                            <div className="flex items-center gap-2 px-3 py-1 rounded-xl bg-red-500/20 border border-red-500">
+                                                <button
+                                                    type="button"
+                                                    onClick={stopRecording}
+                                                    className="p-1 rounded-lg bg-red-500 hover:bg-red-600 transition-all"
+                                                    title="Stop Recording"
+                                                >
+                                                    <Square size={16} className="text-white" />
+                                                </button>
+                                                <span className="text-red-500 text-sm font-mono font-bold">
+                                                    {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
+                                                </span>
+                                                <div className="flex gap-1">
+                                                    <div className="w-1 h-3 bg-red-500 rounded animate-pulse" style={{ animationDelay: '0ms' }}></div>
+                                                    <div className="w-1 h-4 bg-red-500 rounded animate-pulse" style={{ animationDelay: '150ms' }}></div>
+                                                    <div className="w-1 h-3 bg-red-500 rounded animate-pulse" style={{ animationDelay: '300ms' }}></div>
+                                                </div>
+                                            </div>
+                                        )}
+                                        <input
+                                            type="text"
+                                            value={newMessage}
+                                            onChange={(e) => setNewMessage(e.target.value)}
+                                            placeholder="Type a message..."
+                                            disabled={isRecording}
+                                            className={`flex-1 px-4 py-2 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50 transition-all ${isRecording ? 'opacity-50' : ''} ${isDarkMode
+                                                ? 'bg-slate-800 border-slate-700 text-white placeholder:text-slate-500'
+                                                : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400'
+                                                }`}
+                                        />
+                                        <button
+                                            type="submit"
+                                            disabled={!newMessage.trim() || sending || isRecording}
+                                            className="p-2 bg-amber-500 text-white rounded-xl hover:bg-amber-600 transition-all disabled:opacity-50 shadow-lg shadow-amber-500/20"
+                                        >
+                                            {sending ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
+                                        </button>
+                                    </div>
+                                </form>
+                            </>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    );
+}
