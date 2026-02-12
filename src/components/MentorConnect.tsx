@@ -10,6 +10,7 @@ import {
   fetchMentorOfferings,
   fetchMentorReviews,
   fetchAllMentorReviews,
+  fetchAllMentorOfferings,
   createSessionRequest,
   fetchSessionRequests,
   subscribeToSessionRequests,
@@ -240,18 +241,31 @@ export const MentorConnect: React.FC<MentorConnectProps> = ({
       });
 
 
-      // Batch fetch reviews for all mentors in a single query (performance optimization)
+      // Batch fetch reviews and offerings for all mentors in parallel
       const mentorIds = data.map(m => m.id);
-      const reviewsMap = await fetchAllMentorReviews(mentorIds, 3);
+      const [reviewsMap, offeringsMap] = await Promise.all([
+        fetchAllMentorReviews(mentorIds, 3),
+        fetchAllMentorOfferings(mentorIds),
+      ]);
 
-      // Map reviews to mentors
-      const mentorsWithReviews = data.map(mentor => ({
-        ...mentor,
-        reviews: reviewsMap.get(mentor.id) || []
-      }));
+      // Map reviews and offerings to mentors, compute real ratings
+      const mentorsWithData = data.map(mentor => {
+        const mentorReviews = reviewsMap.get(mentor.id) || [];
+        const mentorOfferings = offeringsMap.get(mentor.id) || [];
+        const avgRating = mentorReviews.length > 0
+          ? mentorReviews.reduce((sum: number, r: any) => sum + (r.rating || 0), 0) / mentorReviews.length
+          : 0;
+        return {
+          ...mentor,
+          reviews: mentorReviews,
+          offerings: mentorOfferings,
+          rating: avgRating,
+          totalReviews: mentorReviews.length,
+        };
+      });
 
 
-      setMentors(mentorsWithReviews);
+      setMentors(mentorsWithData);
     } catch (error) {
       console.error('Error loading mentors:', error);
     } finally {
@@ -386,6 +400,7 @@ export const MentorConnect: React.FC<MentorConnectProps> = ({
       // Switch to sessions view to show the pending request
       console.log('Switching to sessions view');
       setActiveView('sessions');
+      setSessionFilter('pending');
 
       // Show success popup
       setShowSuccessPopup(true);
@@ -487,7 +502,7 @@ export const MentorConnect: React.FC<MentorConnectProps> = ({
   }
 
   return (
-    <div className={`min-h-screen ${isDarkMode ? 'bg-slate-900' : 'bg-slate-50'}`}>
+    <div className={`min-h-screen px-4 sm:px-6 lg:px-8 ${isDarkMode ? 'bg-slate-900' : 'bg-slate-50'}`}>
       {/* Success Popup */}
       {showSuccessPopup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -1034,6 +1049,25 @@ export const MentorConnect: React.FC<MentorConnectProps> = ({
                     <p className={`text-sm line-clamp-2 mb-4 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                       {mentor.bio || 'Experienced mentor ready to help you grow!'}
                     </p>
+
+                    {/* Offerings Tags Preview (when no filter applied) */}
+                    {!selectedOfferingType && mentor.offerings && mentor.offerings.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mb-4">
+                        {mentor.offerings.slice(0, 3).map((offering: any, idx: number) => (
+                          <span
+                            key={idx}
+                            className={`px-2 py-1 text-xs rounded-full font-medium ${isDarkMode ? 'bg-purple-500/15 text-purple-400 border border-purple-500/20' : 'bg-purple-50 text-purple-600 border border-purple-200'}`}
+                          >
+                            {offering.title}{offering.isFree ? '' : ` • ₹${offering.price}`}
+                          </span>
+                        ))}
+                        {mentor.offerings.length > 3 && (
+                          <span className={`px-2 py-1 text-xs rounded-full ${isDarkMode ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>
+                            +{mentor.offerings.length - 3} more
+                          </span>
+                        )}
+                      </div>
+                    )}
 
                     {/* Matched Offering Preview (when filter is applied) */}
                     {selectedOfferingType && mentor.offerings && mentor.offerings.filter(o =>

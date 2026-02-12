@@ -237,12 +237,18 @@ export const storage = {
         return localSessions;
       }
 
-      // Use database data if available, otherwise use localStorage
-      const sessions = dbSessions.length > 0 ? dbSessions : localSessions;
+      // Merge sessions from both sources, preferring localStorage for conflicts
+      // This ensures newly saved sessions from the timer aren't lost if DB save fails
+      const sessionMap = new Map<string, StudySession>();
+      dbSessions.forEach(s => sessionMap.set(s.id, s));
+      localSessions.forEach(s => sessionMap.set(s.id, s));
+      const sessions = Array.from(sessionMap.values()).sort(
+        (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
+      );
 
       // Always update localStorage cache
       localStorage.setItem(storageKey, JSON.stringify(sessions));
-      console.log(`Using ${sessions.length} sessions (from ${dbSessions.length > 0 ? 'database' : 'localStorage'})`);
+      console.log(`Using ${sessions.length} sessions (merged from ${dbSessions.length} DB + ${localSessions.length} local)`);
 
       return sessions;
     } else {

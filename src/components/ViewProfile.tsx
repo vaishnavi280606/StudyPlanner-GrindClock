@@ -123,26 +123,26 @@ export function ViewProfile({ userId, isDarkMode, onBack, onStartChat, onStartVi
     try {
       const { data } = await supabase
         .from('study_sessions')
-        .select('duration_minutes, created_at')
+        .select('duration_minutes, start_time, created_at, focus_rating')
         .eq('user_id', userId)
-        .order('created_at', { ascending: false });
+        .order('start_time', { ascending: false });
 
       if (data) {
         const total = data.reduce((sum, session) => sum + (session.duration_minutes || 0), 0);
         setTotalStudyTime(total);
         setTotalSessions(data.length);
 
-        // Calculate streak - consecutive days with study sessions
+        // Calculate streak - consecutive days with study sessions (same as Dashboard's calculateStreak, using getTime for local timezone)
         if (data.length > 0) {
           const today = new Date();
           today.setHours(0, 0, 0, 0);
 
-          // Get unique study dates
-          const studyDates = new Set<string>();
+          // Get unique study dates using getTime() for local timezone comparison
+          const sessionDates = new Set<number>();
           data.forEach(session => {
-            const date = new Date(session.created_at);
+            const date = new Date(session.start_time || session.created_at);
             date.setHours(0, 0, 0, 0);
-            studyDates.add(date.toISOString().split('T')[0]);
+            sessionDates.add(date.getTime());
           });
 
           // Count streak starting from today or yesterday
@@ -150,13 +150,13 @@ export function ViewProfile({ userId, isDarkMode, onBack, onStartChat, onStartVi
           let checkDate = new Date(today);
 
           // Check if studied today
-          if (studyDates.has(checkDate.toISOString().split('T')[0])) {
+          if (sessionDates.has(checkDate.getTime())) {
             streak = 1;
             checkDate.setDate(checkDate.getDate() - 1);
           } else {
             // Check yesterday
             checkDate.setDate(checkDate.getDate() - 1);
-            if (!studyDates.has(checkDate.toISOString().split('T')[0])) {
+            if (!sessionDates.has(checkDate.getTime())) {
               setStudyStreak(0);
               return;
             }
@@ -165,7 +165,7 @@ export function ViewProfile({ userId, isDarkMode, onBack, onStartChat, onStartVi
           }
 
           // Count consecutive days
-          while (studyDates.has(checkDate.toISOString().split('T')[0])) {
+          while (sessionDates.has(checkDate.getTime())) {
             streak++;
             checkDate.setDate(checkDate.getDate() - 1);
           }
@@ -488,14 +488,14 @@ export function ViewProfile({ userId, isDarkMode, onBack, onStartChat, onStartVi
                   >
                     <div className="flex items-start gap-3">
                       <img
-                        src={review.student?.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(review.student?.fullName || 'U')}&background=random`}
-                        alt={review.student?.fullName}
+                        src={review.studentAvatarUrl || review.student_profile?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(review.studentName || review.student_profile?.full_name || 'U')}&background=random`}
+                        alt={review.studentName || review.student_profile?.full_name}
                         className="w-10 h-10 rounded-full object-cover"
                       />
                       <div className="flex-1">
                         <div className="flex items-center justify-between mb-1">
                           <span className={`font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                            {review.student?.fullName || 'Anonymous student'}
+                            {review.studentName || review.student_profile?.full_name || 'Anonymous student'}
                           </span>
                           <div className="flex items-center gap-1">
                             {[...Array(5)].map((_, i) => (
@@ -511,13 +511,13 @@ export function ViewProfile({ userId, isDarkMode, onBack, onStartChat, onStartVi
                             ))}
                           </div>
                         </div>
-                        {review.reviewText && (
-                          <p className={`text-sm mt-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-600'} italic bg-${isDarkMode ? 'slate-900/40' : 'white'} p-2 rounded-lg`}>
-                            "{review.reviewText}"
+                        {(review.review_text || review.reviewText) && (
+                          <p className={`text-sm mt-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-600'} italic ${isDarkMode ? 'bg-slate-900/40' : 'bg-white'} p-2 rounded-lg`}>
+                            "{review.review_text || review.reviewText}"
                           </p>
                         )}
                         <p className={`text-xs mt-2 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                          {new Date(review.createdAt).toLocaleDateString()}
+                          {new Date(review.created_at || review.createdAt).toLocaleDateString()}
                         </p>
                       </div>
                     </div>

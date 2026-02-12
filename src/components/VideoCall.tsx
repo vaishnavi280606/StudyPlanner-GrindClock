@@ -35,20 +35,23 @@ export function VideoCall({
     const [signalingStatus, setSignalingStatus] = useState<string>('IDLE');
     const [isSwapped, setIsSwapped] = useState(false);
     const [showAddFriend, setShowAddFriend] = useState(false);
+    const [connectionQuality, setConnectionQuality] = useState<'excellent' | 'good' | 'poor' | 'unknown'>('unknown');
 
     const localVideoRef = useRef<HTMLVideoElement>(null);
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
     const peerConnection = useRef<RTCPeerConnection | null>(null);
     const signaling = useRef<WebRTCSignaling | null>(null);
     const reconnectTimer = useRef<NodeJS.Timeout | null>(null);
+    const statsTimer = useRef<NodeJS.Timeout | null>(null);
     const reconnectAttempts = useRef(0);
-    const maxReconnect = 3;
+    const maxReconnect = 5;
 
     useEffect(() => {
         initializeCall();
 
         return () => {
             if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+            if (statsTimer.current) clearInterval(statsTimer.current);
             cleanupCall();
         };
     }, []);
@@ -84,6 +87,51 @@ export function VideoCall({
             remoteVideoRef.current.srcObject = remoteStream;
         }
     }, [remoteStream]);
+
+    // Monitor connection quality via WebRTC stats
+    useEffect(() => {
+        if (connectionState !== 'connected' || !peerConnection.current) {
+            setConnectionQuality('unknown');
+            return;
+        }
+
+        statsTimer.current = setInterval(async () => {
+            try {
+                const pc = peerConnection.current;
+                if (!pc) return;
+                const stats = await pc.getStats();
+                let roundTripTime = 0;
+                let packetsLost = 0;
+                let packetsReceived = 0;
+
+                stats.forEach((report: any) => {
+                    if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                        roundTripTime = report.currentRoundTripTime || 0;
+                    }
+                    if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                        packetsLost = report.packetsLost || 0;
+                        packetsReceived = report.packetsReceived || 0;
+                    }
+                });
+
+                const lossRate = packetsReceived > 0 ? packetsLost / (packetsReceived + packetsLost) : 0;
+
+                if (roundTripTime < 0.1 && lossRate < 0.01) {
+                    setConnectionQuality('excellent');
+                } else if (roundTripTime < 0.3 && lossRate < 0.05) {
+                    setConnectionQuality('good');
+                } else {
+                    setConnectionQuality('poor');
+                }
+            } catch {
+                // Stats not available
+            }
+        }, 3000);
+
+        return () => {
+            if (statsTimer.current) clearInterval(statsTimer.current);
+        };
+    }, [connectionState]);
 
     const initializeCall = async () => {
         try {
@@ -153,8 +201,11 @@ export function VideoCall({
                     { urls: 'stun:stun4.l.google.com:19302' },
                     { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
                     { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+                    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
                 ],
                 iceCandidatePoolSize: 10,
+                bundlePolicy: 'max-bundle',
+                rtcpMuxPolicy: 'require',
             });
             peerConnection.current = pc;
 
@@ -541,7 +592,23 @@ export function VideoCall({
                 <div className="absolute bottom-6 left-6 text-white/60 text-xs font-medium z-10 flex flex-col gap-1">
                     <div className="flex items-center gap-2">
                         <div className={`w-2 h-2 rounded-full ${connectionState === 'connected' ? 'bg-green-500' : 'bg-amber-500'} animate-pulse`} />
-                        {connectionState === 'connected' ? 'HD Connection • Secured' : 'Establishing Connection...'}
+                        {connectionState === 'connected' ? (
+                            <span className="flex items-center gap-1.5">
+                                {connectionQuality === 'excellent' ? 'HD Connection' : connectionQuality === 'good' ? 'Good Connection' : connectionQuality === 'poor' ? 'Weak Connection' : 'Connected'}
+                                {' • Secured'}
+                                <span className="flex gap-0.5 ml-1">
+                                    {['excellent', 'good', 'poor'].map((q, i) => (
+                                        <div key={i} className={`w-1 rounded-full ${
+                                            (connectionQuality === 'excellent' && i <= 2) ||
+                                            (connectionQuality === 'good' && i <= 1) ||
+                                            (connectionQuality === 'poor' && i === 0)
+                                                ? 'bg-green-500'
+                                                : 'bg-white/20'
+                                        }`} style={{ height: `${8 + i * 4}px` }} />
+                                    ))}
+                                </span>
+                            </span>
+                        ) : 'Establishing Connection...'}
                     </div>
                     {signalingStatus !== 'SUBSCRIBED' && (
                         <div className="flex items-center gap-2 text-white/40 italic">

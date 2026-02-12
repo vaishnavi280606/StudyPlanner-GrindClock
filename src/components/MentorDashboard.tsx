@@ -284,8 +284,21 @@ const MentorDashboard: React.FC<MentorDashboardProps> = ({
   };
 
   const pendingRequests = sessionRequests.filter(r => r.status === 'pending');
-  const acceptedRequests = sessionRequests.filter(r => r.status === 'accepted');
-  const completedRequests = sessionRequests.filter(r => r.status === 'completed');
+  // Filter accepted requests: only show future/upcoming sessions, move past ones to completed
+  const now = new Date();
+  const allAccepted = sessionRequests.filter(r => r.status === 'accepted');
+  const acceptedRequests = allAccepted.filter(r => {
+    if (!r.preferredDate || !r.preferredTime) return true; // no date = keep in upcoming
+    const sessionDate = new Date(`${r.preferredDate}T${r.preferredTime}`);
+    // Keep sessions that haven't ended yet (give 2 hour buffer after start time)
+    return (now.getTime() - sessionDate.getTime()) < 2 * 60 * 60 * 1000;
+  });
+  const pastAccepted = allAccepted.filter(r => {
+    if (!r.preferredDate || !r.preferredTime) return false;
+    const sessionDate = new Date(`${r.preferredDate}T${r.preferredTime}`);
+    return (now.getTime() - sessionDate.getTime()) >= 2 * 60 * 60 * 1000;
+  });
+  const completedRequests = [...sessionRequests.filter(r => r.status === 'completed'), ...pastAccepted];
 
   console.log('MentorDashboard - Session Requests:', sessionRequests);
   console.log('MentorDashboard - Pending Requests:', pendingRequests);
@@ -307,7 +320,7 @@ const MentorDashboard: React.FC<MentorDashboardProps> = ({
   }
 
   return (
-    <div className={`min-h-screen ${isDarkMode ? 'bg-slate-900' : 'bg-slate-50'}`}>
+    <div className={`min-h-screen px-4 sm:px-6 lg:px-8 ${isDarkMode ? 'bg-slate-900' : 'bg-slate-50'}`}>
       {/* Confirmation Popup */}
       {showConfirmPopup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -490,7 +503,7 @@ const MentorDashboard: React.FC<MentorDashboardProps> = ({
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto p-6">
+      <div className="space-y-6">
         {/* Header */}
         <div className="mb-8">
           <h1 className={`text-3xl font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
@@ -502,7 +515,7 @@ const MentorDashboard: React.FC<MentorDashboardProps> = ({
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
           <div className={`p-6 rounded-xl ${isDarkMode ? 'bg-slate-800' : 'bg-white'} shadow-lg`}>
             <div className="flex items-center justify-between">
               <div>
@@ -545,6 +558,55 @@ const MentorDashboard: React.FC<MentorDashboardProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Upcoming Sessions Quick View */}
+        {acceptedRequests.length > 0 && (
+          <div className={`mb-6 p-5 rounded-xl border ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} shadow-lg`}>
+            <h3 className={`text-base font-bold mb-3 flex items-center gap-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+              <Calendar size={18} className="text-green-500" />
+              Upcoming Sessions ({acceptedRequests.length})
+            </h3>
+            <div className="space-y-2">
+              {acceptedRequests.slice(0, 3).map((req: any) => {
+                const timeStr = req.preferredDate && req.preferredTime
+                  ? getTimeUntilSession(req.preferredDate, req.preferredTime)
+                  : null;
+                return (
+                  <div key={req.id} className={`flex items-center justify-between p-3 rounded-lg ${isDarkMode ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <img
+                        src={req.studentProfile?.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(req.studentProfile?.fullName || 'S')}&background=random&size=32`}
+                        alt="" className="w-8 h-8 rounded-full object-cover shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <p className={`text-sm font-bold truncate ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{req.studentProfile?.fullName || 'Student'}</p>
+                        <p className={`text-xs truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{req.topic}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {req.preferredDate && (
+                        <span className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{req.preferredDate}</span>
+                      )}
+                      {timeStr && (
+                        <span className="text-xs font-bold text-green-500 flex items-center gap-1"><Timer size={10} />{timeStr}</span>
+                      )}
+                      {req.meetingLink && (
+                        <a href={req.meetingLink} target="_blank" rel="noopener noreferrer"
+                          className="text-xs px-2 py-1 rounded-md bg-blue-500 text-white hover:bg-blue-600 transition-all flex items-center gap-1"
+                        ><Link size={10} /> Join</a>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {acceptedRequests.length > 3 && (
+                <p className={`text-xs text-center pt-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                  +{acceptedRequests.length - 3} more — view all in Sessions
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex gap-2 mb-6 border-b border-slate-300 dark:border-slate-700">
@@ -1293,10 +1355,14 @@ const MentorDashboard: React.FC<MentorDashboardProps> = ({
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-1 bg-amber-500/10 px-3 py-1 rounded-full">
                     <Star className="text-amber-500 fill-amber-500" size={16} />
-                    <span className="font-bold text-amber-500">{mentorProfile?.rating.toFixed(1) || '0.0'}</span>
+                    <span className="font-bold text-amber-500">
+                      {reviews.length > 0
+                        ? (reviews.reduce((sum: number, r: any) => sum + (r.rating || 0), 0) / reviews.length).toFixed(1)
+                        : mentorProfile?.rating?.toFixed(1) || '0.0'}
+                    </span>
                   </div>
                   <span className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    ({mentorProfile?.totalReviews || 0} reviews)
+                    ({reviews.length || mentorProfile?.totalReviews || 0} reviews)
                   </span>
                 </div>
               </div>
@@ -1315,13 +1381,13 @@ const MentorDashboard: React.FC<MentorDashboardProps> = ({
                     >
                       <div className="flex items-center gap-3 mb-4">
                         <img
-                          src={review.student?.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(review.student?.fullName || 'U')}&background=random`}
-                          alt={review.student?.fullName}
-                          className="w-10 h-10 rounded-full"
+                          src={review.studentAvatarUrl || review.student_profile?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(review.studentName || review.student_profile?.full_name || 'U')}&background=random`}
+                          alt={review.studentName || review.student_profile?.full_name}
+                          className="w-10 h-10 rounded-full object-cover"
                         />
                         <div className="flex-1">
                           <h4 className={`font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                            {review.student?.fullName || 'Anonymous student'}
+                            {review.studentName || review.student_profile?.full_name || 'Anonymous student'}
                           </h4>
                           <div className="flex items-center gap-2">
                             <div className="flex items-center gap-0.5">
@@ -1337,7 +1403,7 @@ const MentorDashboard: React.FC<MentorDashboardProps> = ({
                               ))}
                             </div>
                             <span className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
-                              {new Date(review.createdAt).toLocaleDateString()}
+                              {new Date(review.created_at || review.createdAt).toLocaleDateString()}
                             </span>
                           </div>
                         </div>
@@ -1349,9 +1415,9 @@ const MentorDashboard: React.FC<MentorDashboardProps> = ({
                           </span>
                         </div>
                       )}
-                      {review.reviewText && (
-                        <p className={`text-sm italic ${isDarkMode ? 'text-slate-300' : 'text-slate-600'} bg-${isDarkMode ? 'slate-900/50' : 'slate-50'} p-3 rounded-lg`}>
-                          "{review.reviewText}"
+                      {(review.review_text || review.reviewText) && (
+                        <p className={`text-sm italic ${isDarkMode ? 'text-slate-300' : 'text-slate-600'} ${isDarkMode ? 'bg-slate-900/50' : 'bg-slate-50'} p-3 rounded-lg`}>
+                          "{review.review_text || review.reviewText}"
                         </p>
                       )}
                     </div>

@@ -1,5 +1,6 @@
 # 🔥 Grind Clock - AI-Powered Study Planner
-
+# Newly updated
+# Done
 > Your personal study companion to track progress, manage exams, and boost productivity with AI assistance.
 
 [![React](https://img.shields.io/badge/React-18.3.1-blue.svg)](https://reactjs.org/)

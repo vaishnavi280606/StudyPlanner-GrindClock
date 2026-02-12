@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bell, Check, X, Loader2, Inbox, MessageSquare, Phone, UserPlus, Users } from 'lucide-react';
+import { Bell, Check, X, Loader2, Inbox, MessageSquare, Phone, UserPlus, Users, Calendar, Star, CheckCircle, XCircle, Ban } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchPendingFriendRequests, updateFriendRequestStatus, fetchNotifications, subscribeToNotifications, submitMentorReview } from '../utils/supabase-queries';
 import { ReviewPopup } from './ReviewPopup';
@@ -33,10 +33,12 @@ export function NotificationCenter({ isDarkMode, onNotificationClick }: Notifica
                 // Optimistically add to list (msg content/type is enough for badge)
                 setNotifications(prev => {
                     if (prev.find(n => n.id === newNotif.id)) return prev;
-                    // Ensure is_read is false by default from DB, but force it here for UI
                     const notifWithDefaults = { ...newNotif, is_read: false };
                     return [notifWithDefaults, ...prev];
                 });
+
+                // Auto-open the notification panel when a new notification arrives
+                setIsOpen(true);
 
                 // Fetch full details in background to get sender profiles
                 refreshNotifications();
@@ -349,14 +351,33 @@ export function NotificationCenter({ isDarkMode, onNotificationClick }: Notifica
                                                     alt=""
                                                     className="w-10 h-10 rounded-full object-cover"
                                                 />
-                                                <div className={`absolute -bottom-1 -right-1 rounded-full p-0.5 border-2 border-slate-900 ${notif.type === 'message' ? 'bg-green-500' :
+                                                <div className={`absolute -bottom-1 -right-1 rounded-full p-0.5 border-2 border-slate-900 ${
+                                                    notif.type === 'message' ? 'bg-green-500' :
                                                     notif.type === 'group_added' ? 'bg-purple-500' :
-                                                        'bg-amber-500'
+                                                    notif.type === 'session_accepted' ? 'bg-green-500' :
+                                                    notif.type === 'session_rejected' ? 'bg-red-500' :
+                                                    notif.type === 'session_completed' ? 'bg-blue-500' :
+                                                    notif.type === 'session_cancelled' ? 'bg-slate-500' :
+                                                    notif.type === 'session_request' ? 'bg-amber-500' :
+                                                    notif.type === 'new_review' ? 'bg-yellow-500' :
+                                                    'bg-amber-500'
                                                     }`}>
                                                     {notif.type === 'message' ? (
                                                         <MessageSquare size={8} className="text-white" />
                                                     ) : notif.type === 'group_added' ? (
                                                         <Users size={8} className="text-white" />
+                                                    ) : notif.type === 'session_accepted' ? (
+                                                        <CheckCircle size={8} className="text-white" />
+                                                    ) : notif.type === 'session_rejected' ? (
+                                                        <XCircle size={8} className="text-white" />
+                                                    ) : notif.type === 'session_completed' ? (
+                                                        <Check size={8} className="text-white" />
+                                                    ) : notif.type === 'session_cancelled' ? (
+                                                        <Ban size={8} className="text-white" />
+                                                    ) : notif.type === 'session_request' ? (
+                                                        <Calendar size={8} className="text-white" />
+                                                    ) : notif.type === 'new_review' ? (
+                                                        <Star size={8} className="text-white" />
                                                     ) : (
                                                         <Phone size={8} className="text-white" />
                                                     )}
@@ -385,6 +406,36 @@ export function NotificationCenter({ isDarkMode, onNotificationClick }: Notifica
                                                         <span className="flex items-center gap-1">
                                                             <MessageSquare size={10} className="flex-shrink-0" />
                                                             {notif.content || 'Sent you a message'}
+                                                        </span>
+                                                    ) : notif.type === 'session_accepted' ? (
+                                                        <span className="flex items-center gap-1 text-green-500">
+                                                            <CheckCircle size={10} className="flex-shrink-0" />
+                                                            {notif.content || 'Session accepted!'}
+                                                        </span>
+                                                    ) : notif.type === 'session_rejected' ? (
+                                                        <span className="flex items-center gap-1 text-red-400">
+                                                            <XCircle size={10} className="flex-shrink-0" />
+                                                            {notif.content || 'Session declined'}
+                                                        </span>
+                                                    ) : notif.type === 'session_completed' ? (
+                                                        <span className="flex items-center gap-1 text-blue-400">
+                                                            <Check size={10} className="flex-shrink-0" />
+                                                            {notif.content || 'Session completed'}
+                                                        </span>
+                                                    ) : notif.type === 'session_cancelled' ? (
+                                                        <span className="flex items-center gap-1 text-slate-400">
+                                                            <Ban size={10} className="flex-shrink-0" />
+                                                            {notif.content || 'Session cancelled'}
+                                                        </span>
+                                                    ) : notif.type === 'session_request' ? (
+                                                        <span className="flex items-center gap-1 text-amber-400">
+                                                            <Calendar size={10} className="flex-shrink-0" />
+                                                            {notif.content || 'New session request'}
+                                                        </span>
+                                                    ) : notif.type === 'new_review' ? (
+                                                        <span className="flex items-center gap-1 text-yellow-400">
+                                                            <Star size={10} className="flex-shrink-0" />
+                                                            {notif.content || 'You received a new review!'}
                                                         </span>
                                                     ) : notif.type === 'friend_request' ? (
                                                         'Wants to be your friend'

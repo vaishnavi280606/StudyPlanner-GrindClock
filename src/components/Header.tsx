@@ -1,5 +1,5 @@
 import React from 'react';
-import { Menu, Zap, Sun, Moon, LayoutDashboard, Clock, BookOpen, Users, GraduationCap, History, User } from 'lucide-react';
+import { Menu, Zap, Sun, Moon, LayoutDashboard, Clock, BookOpen, Users, GraduationCap, History, User, CalendarCheck, MessageCircle, Tag } from 'lucide-react';
 import { NotificationCenter } from './NotificationCenter';
 import { UserProfile } from './UserProfile';
 
@@ -46,8 +46,10 @@ export const Header: React.FC<HeaderProps> = ({
     const mainNavigation = userRole === 'mentor'
         ? [
             { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-            { id: 'mentors', label: 'My Students', icon: GraduationCap },
-            { id: 'profile', label: 'My Profile', icon: User },
+            { id: 'mentor-sessions', label: 'Sessions', icon: CalendarCheck },
+            { id: 'mentor-students', label: 'Students', icon: GraduationCap },
+            { id: 'friends', label: 'Friends', icon: Users },
+            { id: 'mentor-offerings', label: 'Offerings', icon: Tag },
         ]
         : [
             { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },

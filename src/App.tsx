@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { BookOpen, LayoutDashboard, Clock, Target, History, Zap, Play, Pause, BarChart3, Brain, Lightbulb, X, Users, GraduationCap, Settings as SettingsIcon, Volume2, VolumeX, Phone, PhoneOff } from 'lucide-react';
+import { BookOpen, LayoutDashboard, Clock, Target, History, Zap, Play, Pause, BarChart3, Brain, Lightbulb, X, Users, GraduationCap, Settings as SettingsIcon, Volume2, VolumeX, Phone, PhoneOff, CalendarCheck, MessageCircle, Tag } from 'lucide-react';
 import { Subject, StudySession, StudyGoal } from './types';
 import { storage } from './utils/storage';
 import { Dashboard } from './components/Dashboard';
@@ -26,8 +26,12 @@ import { Header } from './components/Header';
 import { Settings } from './components/Settings';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastNotification } from './components/ToastNotification';
+import MentorDashboard from './components/MentorDashboard';
+import { MentorSessionsPage } from './components/MentorSessionsPage';
+import { MentorStudentsPage } from './components/MentorStudentsPage';
+import { MentorOfferingsPage } from './components/MentorOfferingsPage';
 
-type View = 'dashboard' | 'subjects' | 'timer' | 'history' | 'goals' | 'analytics' | 'recommendations' | 'techniques' | 'mentors' | 'friends' | 'settings';
+type View = 'dashboard' | 'subjects' | 'timer' | 'history' | 'goals' | 'analytics' | 'recommendations' | 'techniques' | 'mentors' | 'friends' | 'settings' | 'mentor-sessions' | 'mentor-students' | 'mentor-offerings';
 
 // Timer state interface
 interface TimerState {
@@ -286,13 +290,26 @@ function AppContent() {
 
   const handleNotificationClick = (notif: any) => {
     if (notif.type === 'message') {
-      // Navigate to friends view (chat is handled inline there)
       setCurrentView('friends');
     } else if (notif.type === 'friend_request') {
       setCurrentView('friends');
     } else if (notif.type === 'call') {
       setIncomingCall(notif);
       playRingtone();
+    } else if (notif.type === 'session_request') {
+      // Mentor got a new booking request → go to mentor sessions
+      setCurrentView(userRole === 'mentor' ? 'mentor-sessions' : 'history');
+    } else if (notif.type === 'session_accepted' || notif.type === 'session_rejected' || notif.type === 'session_cancelled') {
+      // Student got session update → go to session history; mentor → mentor sessions
+      setCurrentView(userRole === 'mentor' ? 'mentor-sessions' : 'history');
+    } else if (notif.type === 'session_completed') {
+      // Handled by ReviewPopup in NotificationCenter, but if clicked normally navigate
+      setCurrentView(userRole === 'mentor' ? 'mentor-sessions' : 'history');
+    } else if (notif.type === 'new_review') {
+      // Mentor got a review → go to mentor sessions
+      setCurrentView('mentor-sessions');
+    } else if (notif.type === 'group_added') {
+      setCurrentView('friends');
     }
   };
 
@@ -595,7 +612,13 @@ function AppContent() {
 
 
   // All navigation items (shown in hamburger menu)
-  const allNavigation = [
+  const allNavigation = userRole === 'mentor' ? [
+    { id: 'dashboard' as View, label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'mentor-sessions' as View, label: 'Sessions', icon: CalendarCheck },
+    { id: 'mentor-students' as View, label: 'Students', icon: GraduationCap },
+    { id: 'friends' as View, label: 'Friends', icon: Users },
+    { id: 'mentor-offerings' as View, label: 'Offerings', icon: Tag },
+  ] : [
     { id: 'dashboard' as View, label: 'Dashboard', icon: LayoutDashboard },
     { id: 'timer' as View, label: 'Study Timer', icon: Clock },
     { id: 'goals' as View, label: 'Goals', icon: Target },
@@ -704,9 +727,9 @@ function AppContent() {
           userRole={userRole}
         />
 
-        {/* Exam Countdown Banner - Only on Dashboard */}
+        {/* Exam Countdown Banner - Only on Dashboard for students */}
         {
-          currentView === 'dashboard' && (
+          currentView === 'dashboard' && userRole !== 'mentor' && (
             <ExamCountdown
               goals={goals}
               isDarkMode={isDarkMode}
@@ -720,7 +743,10 @@ function AppContent() {
 
         <div className="flex-1 relative overflow-hidden flex flex-col">
           <main className={`flex-1 overflow-y-auto px-6 py-8 pb-24 ${currentView === 'friends' ? 'scrollbar-hide' : ''}`}>
-            {currentView === 'dashboard' && (
+            {currentView === 'dashboard' && userRole === 'mentor' && (
+              <MentorDashboard isDarkMode={isDarkMode} onStartVideoCall={handleStartVideoCall} />
+            )}
+            {currentView === 'dashboard' && userRole !== 'mentor' && (
               <Dashboard subjects={subjects} sessions={sessions} goals={goals} isDarkMode={isDarkMode} />
             )}
             {currentView === 'subjects' && (
@@ -792,7 +818,17 @@ function AppContent() {
               <FriendsCircle
                 isDarkMode={isDarkMode}
                 onStartVideoCall={handleStartVideoCall}
+                userRole={userRole}
               />
+            )}
+            {currentView === 'mentor-sessions' && (
+              <MentorSessionsPage isDarkMode={isDarkMode} onStartVideoCall={handleStartVideoCall} />
+            )}
+            {currentView === 'mentor-students' && (
+              <MentorStudentsPage isDarkMode={isDarkMode} onStartVideoCall={handleStartVideoCall} />
+            )}
+            {currentView === 'mentor-offerings' && (
+              <MentorOfferingsPage isDarkMode={isDarkMode} />
             )}
             {currentView === 'settings' && (
               <Settings

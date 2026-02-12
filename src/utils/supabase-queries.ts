@@ -27,6 +27,37 @@ export const fetchMentors = async (): Promise<Mentor[]> => {
     }));
 };
 
+/* Helper: compute study streak (consecutive days) from study_sessions rows.
+   Uses start_time (matching Dashboard's calculateStreak) with created_at fallback.
+   Uses date.getTime() for comparison (local timezone, same as Dashboard). */
+const computeStreak = (sessions: { start_time?: string; created_at: string }[]): number => {
+    if (!sessions || sessions.length === 0) return 0;
+    const sessionDates = new Set<number>();
+    sessions.forEach(s => {
+        const d = new Date(s.start_time || s.created_at);
+        d.setHours(0, 0, 0, 0);
+        sessionDates.add(d.getTime());
+    });
+    let streak = 0;
+    const check = new Date();
+    check.setHours(0, 0, 0, 0);
+    // Check today
+    if (sessionDates.has(check.getTime())) {
+        streak = 1;
+        check.setDate(check.getDate() - 1);
+    } else {
+        check.setDate(check.getDate() - 1);
+        if (!sessionDates.has(check.getTime())) return 0;
+        streak = 1;
+        check.setDate(check.getDate() - 1);
+    }
+    while (sessionDates.has(check.getTime())) {
+        streak++;
+        check.setDate(check.getDate() - 1);
+    }
+    return streak;
+};
+
 export const fetchFriends = async (userId: string): Promise<Friend[]> => {
     // Fetch accepted friendships
     const { data, error } = await supabase
@@ -58,21 +89,56 @@ export const fetchFriends = async (userId: string): Promise<Friend[]> => {
         return [];
     }
 
-    return data.map(f => {
-        // Determine which profile belongs to the friend (not the current user)
+    // Build friend list
+    const friendsList = data.map(f => {
         const isUserSender = f.user_id === userId;
         const profile: any = isUserSender ? f.friend_profile : f.user_profile;
-
         return {
             id: isUserSender ? f.friend_id : f.user_id,
             name: profile?.full_name || 'Unknown User',
             username: profile?.username || 'unknown',
-            status: 'offline',
+            status: 'offline' as const,
             studyStreak: 0,
             avatarUrl: profile?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile?.full_name || 'U')}&background=random`,
             role: profile?.role || 'student',
         };
     });
+
+    // Always compute streaks from study_sessions (same algorithm as Dashboard's calculateStreak)
+    const friendIds = friendsList.map(f => f.id);
+    if (friendIds.length > 0) {
+        // Compute streaks from study_sessions for ALL friends (ignore stale study_streak column)
+        const zeroIds = friendIds;
+        if (zeroIds.length > 0) {
+            try {
+                const ninetyDaysAgo = new Date();
+                ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+                const { data: sessionRows, error: sessErr } = await supabase
+                    .from('study_sessions')
+                    .select('user_id, start_time, created_at')
+                    .in('user_id', zeroIds)
+                    .gte('created_at', ninetyDaysAgo.toISOString())
+                    .order('start_time', { ascending: false });
+
+                if (!sessErr && sessionRows && sessionRows.length > 0) {
+                    const grouped: Record<string, { created_at: string }[]> = {};
+                    sessionRows.forEach(row => {
+                        if (!grouped[row.user_id]) grouped[row.user_id] = [];
+                        grouped[row.user_id].push(row);
+                    });
+                    friendsList.forEach(f => {
+                        if (grouped[f.id]) {
+                            f.studyStreak = computeStreak(grouped[f.id]);
+                        }
+                    });
+                }
+            } catch (err) {
+                console.warn('[fetchFriends] Could not compute streaks from study_sessions (RLS may be blocking). Run fix-friend-streaks.sql to fix.', err);
+            }
+        }
+    }
+
+    return friendsList;
 };
 
 export const searchUsers = async (query: string, currentUserId: string): Promise<UserProfile[]> => {
@@ -256,30 +322,33 @@ export const subscribeToMessages = (userId: string, onMessage: (message: any) =>
         .subscribe();
 };
 
-export const createNotification = async (userId: string, senderId: string, type: 'friend_request' | 'message' | 'call', content: string) => {
+export const createNotification = async (
+    userId: string,
+    senderId: string,
+    type: 'friend_request' | 'message' | 'call' | 'call_ended' | 'group_added' | 'session_request' | 'session_accepted' | 'session_rejected' | 'session_completed' | 'session_cancelled' | 'session_reminder' | 'new_review',
+    content: string,
+    metadata?: Record<string, any>
+) => {
+    const insertData: any = {
+        user_id: userId,
+        sender_id: senderId,
+        type,
+        content
+    };
+    if (metadata) insertData.metadata = metadata;
+
     const { error } = await supabase
         .from('notifications')
-        .insert({
-            user_id: userId,
-            sender_id: senderId,
-            type,
-            content
-        });
+        .insert(insertData);
 
     return { error };
 };
 
 export const fetchNotifications = async (userId: string) => {
+    // Fetch notifications without FK joins (FK may point to auth.users, not user_profiles)
     const { data, error } = await supabase
         .from('notifications')
-        .select(`
-            *,
-            sender_profile:user_profiles!notifications_sender_id_fkey (
-                full_name,
-                avatar_url,
-                username
-            )
-        `)
+        .select('*')
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
 
@@ -288,12 +357,27 @@ export const fetchNotifications = async (userId: string) => {
         return [];
     }
 
-    return data.map(notif => ({
-        ...notif,
-        senderName: notif.sender_profile?.full_name || 'Unknown User',
-        senderAvatar: notif.sender_profile?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(notif.sender_profile?.full_name || 'U')}&background=random`,
-        senderUsername: notif.sender_profile?.username || 'unknown'
-    }));
+    if (!data || data.length === 0) return [];
+
+    // Batch-fetch sender profiles
+    const senderIds = [...new Set(data.map(n => n.sender_id).filter(Boolean))];
+    const { data: profiles } = await supabase
+        .from('user_profiles')
+        .select('user_id, full_name, avatar_url, username')
+        .in('user_id', senderIds);
+
+    const profileMap = new Map<string, any>();
+    if (profiles) profiles.forEach(p => profileMap.set(p.user_id, p));
+
+    return data.map(notif => {
+        const sender = profileMap.get(notif.sender_id);
+        return {
+            ...notif,
+            senderName: sender?.full_name || 'Unknown User',
+            senderAvatar: sender?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(sender?.full_name || 'U')}&background=random`,
+            senderUsername: sender?.username || 'unknown'
+        };
+    });
 };
 
 export const subscribeToNotifications = (userId: string, onNotification: (notification: any) => void) => {
@@ -411,7 +495,16 @@ export const fetchUserGroups = async (userId: string) => {
         return [];
     }
 
-    return memberData.map((m: any) => m.group);
+    return memberData.map((m: any) => {
+        const g = m.group;
+        return {
+            id: g.id,
+            name: g.name,
+            avatarUrl: g.avatar_url || '',
+            createdBy: g.created_by,
+            createdAt: g.created_at,
+        };
+    });
 };
 
 export const addGroupMember = async (groupId: string, userId: string) => {
@@ -453,6 +546,26 @@ export const fetchGroupMembers = async (groupId: string) => {
         joinedAt: new Date(m.joined_at),
         profile: m.profile
     }));
+};
+
+export const removeGroupMember = async (groupId: string, userId: string) => {
+    const { error } = await supabase
+        .from('group_members')
+        .delete()
+        .eq('group_id', groupId)
+        .eq('user_id', userId);
+
+    return { error };
+};
+
+export const updateGroupMemberRole = async (groupId: string, userId: string, role: 'admin' | 'member') => {
+    const { error } = await supabase
+        .from('group_members')
+        .update({ role })
+        .eq('group_id', groupId)
+        .eq('user_id', userId);
+
+    return { error };
 };
 
 export const sendGroupMessage = async (groupId: string, senderId: string, content: string) => {
@@ -549,6 +662,13 @@ export const fetchUpcomingSessions = async (userId: string, role: 'student' | 'm
 
     return data.map(session => ({
         ...session,
+        mentorId: session.mentor_id,
+        studentId: session.student_id,
+        preferredDate: session.preferred_date,
+        preferredTime: session.preferred_time,
+        mentorResponse: session.mentor_response,
+        meetingLink: session.meeting_link,
+        studentMessage: session.student_message,
         mentorProfile: {
             fullName: session.mentor_profile?.full_name,
             avatarUrl: session.mentor_profile?.avatar_url
@@ -587,6 +707,164 @@ export const fetchMentorsFromProfiles = async (): Promise<Mentor[]> => {
     }));
 };
 
+export const fetchMentorProfile = async (userId: string): Promise<Mentor | null> => {
+    const { data, error } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('role', 'mentor')
+        .single();
+
+    if (error || !data) {
+        console.error('Error fetching mentor profile:', error);
+        return null;
+    }
+
+    // Fetch aggregated review stats
+    const { data: reviewData } = await supabase
+        .from('mentor_reviews')
+        .select('rating')
+        .eq('mentor_id', userId);
+
+    const reviews = reviewData || [];
+    const totalReviews = reviews.length;
+    const avgRating = totalReviews > 0
+        ? reviews.reduce((sum: number, r: any) => sum + (r.rating || 0), 0) / totalReviews
+        : 0;
+
+    return {
+        id: data.user_id,
+        name: data.full_name || 'Anonymous Mentor',
+        username: data.username,
+        avatarUrl: data.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(data.full_name || 'M')}&background=random`,
+        domain: data.profession ? [data.profession] : [],
+        experienceYears: parseInt(data.experience || '0'),
+        bio: data.experience || '',
+        skills: [],
+        languages: ['English'],
+        rating: avgRating,
+        totalReviews,
+        isVerified: true
+    };
+};
+
+export const createMentorOffering = async (offering: any) => {
+    const { data, error } = await supabase
+        .from('mentorship_offerings')
+        .insert(offering)
+        .select()
+        .single();
+
+    return { data, error };
+};
+
+export const deleteMentorOffering = async (offeringId: string) => {
+    const { error } = await supabase
+        .from('mentorship_offerings')
+        .delete()
+        .eq('id', offeringId);
+
+    if (error) console.error('Error deleting offering:', error);
+};
+
+export const updateMentorOffering = async (offeringId: string, updates: Record<string, any>) => {
+    const { data, error } = await supabase
+        .from('mentorship_offerings')
+        .update(updates)
+        .eq('id', offeringId)
+        .select()
+        .single();
+
+    if (error) console.error('Error updating offering:', error);
+    return { data, error };
+};
+
+export const acceptSessionRequest = async (requestId: string, responseText: string, meetingLink: string) => {
+    // Fetch the request first to get student_id and mentor_id for notification
+    const { data: reqData } = await supabase
+        .from('session_requests')
+        .select('student_id, mentor_id, topic')
+        .eq('id', requestId)
+        .single();
+
+    const { error } = await supabase
+        .from('session_requests')
+        .update({
+            status: 'accepted',
+            mentor_response: responseText,
+            meeting_link: meetingLink,
+        })
+        .eq('id', requestId);
+
+    if (error) {
+        console.error('Error accepting session request:', error);
+    } else if (reqData) {
+        // Notify the student that their session was accepted
+        await createNotification(
+            reqData.student_id,
+            reqData.mentor_id,
+            'session_accepted',
+            `Your session request "${reqData.topic}" has been accepted!${meetingLink ? ' Meeting link provided.' : ''}`
+        );
+    }
+};
+
+export const rejectSessionRequest = async (requestId: string, responseText: string) => {
+    const { data: reqData } = await supabase
+        .from('session_requests')
+        .select('student_id, mentor_id, topic')
+        .eq('id', requestId)
+        .single();
+
+    const { error } = await supabase
+        .from('session_requests')
+        .update({
+            status: 'rejected',
+            mentor_response: responseText,
+        })
+        .eq('id', requestId);
+
+    if (error) {
+        console.error('Error rejecting session request:', error);
+    } else if (reqData) {
+        await createNotification(
+            reqData.student_id,
+            reqData.mentor_id,
+            'session_rejected',
+            `Your session request "${reqData.topic}" was declined.${responseText ? ' Reason: ' + responseText : ''}`
+        );
+    }
+};
+
+export const updateSessionMeetingLink = async (requestId: string, meetingLink: string) => {
+    const { error } = await supabase
+        .from('session_requests')
+        .update({ meeting_link: meetingLink })
+        .eq('id', requestId);
+
+    if (error) console.error('Error updating meeting link:', error);
+};
+
+export const subscribeToMentorReviews = (mentorId: string, callback: (review: any) => void) => {
+    const channel = supabase
+        .channel(`mentor-reviews-${mentorId}-${Date.now()}`)
+        .on('postgres_changes', {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'mentor_reviews',
+            filter: `mentor_id=eq.${mentorId}`,
+        }, (payload: any) => {
+            callback(payload.new);
+        })
+        .subscribe();
+
+    return {
+        unsubscribe: () => {
+            supabase.removeChannel(channel);
+        }
+    };
+};
+
 export const fetchMentorOfferings = async (mentorId: string): Promise<any[]> => {
     const { data, error } = await supabase
         .from('mentorship_offerings')
@@ -601,8 +879,36 @@ export const fetchMentorOfferings = async (mentorId: string): Promise<any[]> => 
     return data || [];
 };
 
-export const fetchMentorReviews = async (mentorId: string): Promise<any[]> => {
+export const fetchAllMentorOfferings = async (mentorIds: string[]): Promise<Map<string, any[]>> => {
+    const offeringsMap = new Map<string, any[]>();
+    if (mentorIds.length === 0) return offeringsMap;
+
     const { data, error } = await supabase
+        .from('mentorship_offerings')
+        .select('*')
+        .in('mentor_id', mentorIds)
+        .eq('is_active', true);
+
+    if (error) {
+        console.error('Error fetching all mentor offerings:', error);
+        return offeringsMap;
+    }
+
+    (data || []).forEach((o: any) => {
+        const mentorOfferings = offeringsMap.get(o.mentor_id) || [];
+        mentorOfferings.push(o);
+        offeringsMap.set(o.mentor_id, mentorOfferings);
+    });
+
+    return offeringsMap;
+};
+
+export const fetchMentorReviews = async (mentorId: string): Promise<any[]> => {
+    // Try with FK join first, fall back to plain query + manual profile lookup
+    let data: any[] | null = null;
+    let error: any = null;
+
+    const result = await supabase
         .from('mentor_reviews')
         .select(`
             *,
@@ -615,12 +921,48 @@ export const fetchMentorReviews = async (mentorId: string): Promise<any[]> => {
         .eq('mentor_id', mentorId)
         .order('created_at', { ascending: false });
 
+    data = result.data;
+    error = result.error;
+
+    // If FK join failed, fetch reviews without join then manually fetch student profiles
     if (error) {
-        console.error('Error fetching mentor reviews:', error);
-        return [];
+        console.warn('FK join failed for mentor_reviews, falling back to manual lookup:', error.message);
+        const plainResult = await supabase
+            .from('mentor_reviews')
+            .select('*')
+            .eq('mentor_id', mentorId)
+            .order('created_at', { ascending: false });
+
+        if (plainResult.error) {
+            console.error('Error fetching mentor reviews:', plainResult.error);
+            return [];
+        }
+
+        data = plainResult.data || [];
+
+        // Manually fetch student profiles
+        const studentIds = [...new Set(data.map((r: any) => r.student_id).filter(Boolean))];
+        if (studentIds.length > 0) {
+            const { data: profiles } = await supabase
+                .from('user_profiles')
+                .select('user_id, full_name, avatar_url, username')
+                .in('user_id', studentIds);
+            const profileMap = new Map((profiles || []).map((p: any) => [p.user_id, p]));
+            return data.map((r: any) => {
+                const profile = profileMap.get(r.student_id);
+                return {
+                    ...r,
+                    studentName: profile?.full_name,
+                    studentAvatarUrl: profile?.avatar_url,
+                    studentUsername: profile?.username,
+                };
+            });
+        }
+
+        return data;
     }
 
-    return data.map(r => ({
+    return (data || []).map(r => ({
         ...r,
         studentName: r.student_profile?.full_name,
         studentAvatarUrl: r.student_profile?.avatar_url,
@@ -630,10 +972,13 @@ export const fetchMentorReviews = async (mentorId: string): Promise<any[]> => {
 
 export const fetchAllMentorReviews = async (mentorIds: string[], limitPerMentor: number = 3) => {
     const reviewsMap = new Map<string, any[]>();
+    if (mentorIds.length === 0) return reviewsMap;
 
-    // For simplicity, we fetch all reviews and filter in JS. 
-    // In a real app, this would be optimized with a specialized query or RPC.
-    const { data, error } = await supabase
+    // Try FK join first, fall back to manual lookup
+    let data: any[] | null = null;
+    let error: any = null;
+
+    const result = await supabase
         .from('mentor_reviews')
         .select(`
             *,
@@ -646,12 +991,53 @@ export const fetchAllMentorReviews = async (mentorIds: string[], limitPerMentor:
         .in('mentor_id', mentorIds)
         .order('created_at', { ascending: false });
 
+    data = result.data;
+    error = result.error;
+
     if (error) {
-        console.error('Error fetching all mentor reviews:', error);
+        console.warn('FK join failed for fetchAllMentorReviews, falling back:', error.message);
+        const plainResult = await supabase
+            .from('mentor_reviews')
+            .select('*')
+            .in('mentor_id', mentorIds)
+            .order('created_at', { ascending: false });
+
+        if (plainResult.error) {
+            console.error('Error fetching all mentor reviews:', plainResult.error);
+            return reviewsMap;
+        }
+
+        data = plainResult.data || [];
+
+        // Manual student profile lookup
+        const studentIds = [...new Set(data.map((r: any) => r.student_id).filter(Boolean))];
+        let profileMap = new Map<string, any>();
+        if (studentIds.length > 0) {
+            const { data: profiles } = await supabase
+                .from('user_profiles')
+                .select('user_id, full_name, avatar_url, username')
+                .in('user_id', studentIds);
+            profileMap = new Map((profiles || []).map((p: any) => [p.user_id, p]));
+        }
+
+        data.forEach((r: any) => {
+            const mentorReviews = reviewsMap.get(r.mentor_id) || [];
+            if (mentorReviews.length < limitPerMentor) {
+                const profile = profileMap.get(r.student_id);
+                mentorReviews.push({
+                    ...r,
+                    studentName: profile?.full_name,
+                    studentAvatarUrl: profile?.avatar_url,
+                    studentUsername: profile?.username,
+                });
+                reviewsMap.set(r.mentor_id, mentorReviews);
+            }
+        });
+
         return reviewsMap;
     }
 
-    data.forEach(r => {
+    (data || []).forEach(r => {
         const mentorReviews = reviewsMap.get(r.mentor_id) || [];
         if (mentorReviews.length < limitPerMentor) {
             mentorReviews.push({
@@ -688,19 +1074,10 @@ export const createSessionRequest = async (request: any) => {
 };
 
 export const fetchSessionRequests = async (userId: string, role: 'student' | 'mentor'): Promise<any[]> => {
+    // First fetch session requests without profile joins (FK hints can fail if FKs point to auth.users)
     const { data, error } = await supabase
         .from('session_requests')
-        .select(`
-            *,
-            mentor_profile:user_profiles!session_requests_mentor_id_fkey (
-                full_name,
-                avatar_url
-            ),
-            student_profile:user_profiles!session_requests_student_id_fkey (
-                full_name,
-                avatar_url
-            )
-        `)
+        .select('*')
         .eq(role === 'student' ? 'student_id' : 'mentor_id', userId)
         .order('created_at', { ascending: false });
 
@@ -709,17 +1086,46 @@ export const fetchSessionRequests = async (userId: string, role: 'student' | 'me
         return [];
     }
 
-    return data.map(s => ({
-        ...s,
-        mentorProfile: {
-            fullName: s.mentor_profile?.full_name,
-            avatarUrl: s.mentor_profile?.avatar_url
-        },
-        studentProfile: {
-            fullName: s.student_profile?.full_name,
-            avatarUrl: s.student_profile?.avatar_url
-        }
-    }));
+    if (!data || data.length === 0) return [];
+
+    // Collect unique mentor and student IDs to batch-fetch profiles
+    const mentorIds = [...new Set(data.map(s => s.mentor_id).filter(Boolean))];
+    const studentIds = [...new Set(data.map(s => s.student_id).filter(Boolean))];
+    const allUserIds = [...new Set([...mentorIds, ...studentIds])];
+
+    // Batch fetch all needed profiles
+    const { data: profiles } = await supabase
+        .from('user_profiles')
+        .select('user_id, full_name, avatar_url')
+        .in('user_id', allUserIds);
+
+    const profileMap = new Map<string, { full_name: string; avatar_url: string }>();
+    if (profiles) {
+        profiles.forEach(p => profileMap.set(p.user_id, p));
+    }
+
+    return data.map(s => {
+        const mentorProfile = profileMap.get(s.mentor_id);
+        const studentProfile = profileMap.get(s.student_id);
+        return {
+            ...s,
+            mentorId: s.mentor_id,
+            studentId: s.student_id,
+            preferredDate: s.preferred_date,
+            preferredTime: s.preferred_time,
+            mentorResponse: s.mentor_response,
+            meetingLink: s.meeting_link,
+            studentMessage: s.student_message,
+            mentorProfile: {
+                fullName: mentorProfile?.full_name,
+                avatarUrl: mentorProfile?.avatar_url
+            },
+            studentProfile: {
+                fullName: studentProfile?.full_name,
+                avatarUrl: studentProfile?.avatar_url
+            }
+        };
+    });
 };
 
 export const subscribeToSessionRequests = (userId: string, role: 'student' | 'mentor', onChange: () => void) => {
@@ -737,19 +1143,58 @@ export const subscribeToSessionRequests = (userId: string, role: 'student' | 'me
 };
 
 export const completeSessionRequest = async (requestId: string) => {
+    const { data: reqData } = await supabase
+        .from('session_requests')
+        .select('student_id, mentor_id, topic')
+        .eq('id', requestId)
+        .single();
+
     const { error } = await supabase
         .from('session_requests')
         .update({ status: 'completed' })
         .eq('id', requestId);
 
+    if (!error && reqData) {
+        // Notify the student that their session is completed, prompting a review
+        await createNotification(
+            reqData.student_id,
+            reqData.mentor_id,
+            'session_completed',
+            `Your session "${reqData.topic}" is marked as completed. Leave a review!`,
+            { requiresReview: true, mentorId: reqData.mentor_id, sessionId: requestId, topic: reqData.topic }
+        );
+    }
+
     return { error };
 };
 
 export const cancelSessionRequest = async (requestId: string) => {
+    const { data: reqData } = await supabase
+        .from('session_requests')
+        .select('student_id, mentor_id, topic')
+        .eq('id', requestId)
+        .single();
+
     const { error } = await supabase
         .from('session_requests')
         .update({ status: 'cancelled' })
         .eq('id', requestId);
+
+    if (!error && reqData) {
+        // Notify both parties about cancellation
+        await createNotification(
+            reqData.student_id,
+            reqData.mentor_id,
+            'session_cancelled',
+            `Session "${reqData.topic}" has been cancelled.`
+        );
+        await createNotification(
+            reqData.mentor_id,
+            reqData.student_id,
+            'session_cancelled',
+            `Session "${reqData.topic}" has been cancelled by the student.`
+        );
+    }
 
     return { error };
 };
@@ -769,10 +1214,20 @@ export const submitMentorReview = async (mentorId: string, studentId: string, re
         .insert({
             mentor_id: mentorId,
             student_id: studentId,
-            session_request_id: requestId, // Check schema if this is the correct column
+            session_request_id: requestId,
             rating,
             review_text: reviewText
         });
+
+    if (!error) {
+        // Notify the mentor about the new review
+        await createNotification(
+            mentorId,
+            studentId,
+            'new_review',
+            `You received a new ${rating}-star review! "${reviewText.length > 60 ? reviewText.substring(0, 60) + '...' : reviewText}"`
+        );
+    }
 
     return { error };
 };
