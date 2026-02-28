@@ -1,5 +1,5 @@
 import React from 'react';
-import { Menu, Zap, Sun, Moon, LayoutDashboard, Clock, BookOpen, Users, GraduationCap, History, User, CalendarCheck, MessageCircle, Tag } from 'lucide-react';
+import { Menu, Zap, Sun, Moon, LayoutDashboard, Clock, BookOpen, Users, GraduationCap, History, CalendarCheck, Tag } from 'lucide-react';
 import { NotificationCenter } from './NotificationCenter';
 import { UserProfile } from './UserProfile';
 
@@ -64,7 +64,7 @@ export const Header: React.FC<HeaderProps> = ({
 
     return (
         <nav className={`shadow-md border-b transition-colors relative z-40 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            <div className="w-full px-6 py-4">
+            <div className="w-full px-4 lg:px-6 py-3 lg:py-4">
                 <div className="flex items-center justify-between">
                     {/* Logo and Text */}
                     <div className="flex items-center gap-3">
@@ -86,8 +86,8 @@ export const Header: React.FC<HeaderProps> = ({
                                     <Zap className="text-white" size={28} />
                                 </div>
                                 <div>
-                                    <h1 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Grind Clock</h1>
-                                    <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Push Your Limits</p>
+                                    <h1 className={`text-xl lg:text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Grind Clock</h1>
+                                    <p className={`text-[10px] lg:text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Push Your Limits</p>
                                 </div>
                             </>
                         )}
@@ -107,7 +107,7 @@ export const Header: React.FC<HeaderProps> = ({
                                         }`}
                                 >
                                     <Icon size={18} />
-                                    <span>{item.label}</span>
+                                    <span className="hidden xl:inline">{item.label}</span>
                                     {item.id === 'friends' && totalUnreadMessages > 0 && (
                                         <span className="ml-1 min-w-[18px] h-[18px] flex items-center justify-center px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold leading-none">
                                             {totalUnreadMessages > 99 ? '99+' : totalUnreadMessages}

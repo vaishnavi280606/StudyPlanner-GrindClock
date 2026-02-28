@@ -442,4 +442,50 @@ export const storage = {
   saveSchedule: (schedule: ScheduleSlot[]) => {
     localStorage.setItem(STORAGE_KEYS.SCHEDULE, JSON.stringify(schedule));
   },
+
+  // Migrate data from guest to authenticated user
+  migrateGuestData: async (userId: string) => {
+    console.log('🚀 Starting guest data migration for user:', userId);
+
+    const migrate = async (key: string, getFn: () => Promise<any[]>, saveFn: (data: any[]) => Promise<void>) => {
+      const guestKey = getUserStorageKey(key, null);
+      const guestData = localStorage.getItem(guestKey);
+
+      if (guestData) {
+        try {
+          const parsed = JSON.parse(guestData);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            console.log(`📦 Migrating ${parsed.length} items from ${guestKey} to user ${userId}`);
+
+            // Get existing user data (if any)
+            const existingUserData = await getFn();
+
+            // Merge (preferring guest data for simpler initial migration, or append)
+            // For subjects and goals, we append if IDs are unique
+            const merged = [...existingUserData];
+            parsed.forEach(item => {
+              if (!merged.find(m => m.id === item.id)) {
+                merged.push(item);
+              }
+            });
+
+            // Save to user storage (this will also sync to Supabase)
+            await saveFn(merged);
+
+            // Clear guest data after successful migration
+            localStorage.removeItem(guestKey);
+            console.log(`✅ Successfully migrated ${key}`);
+          }
+        } catch (err) {
+          console.error(`❌ Error migrating ${key}:`, err);
+        }
+      }
+    };
+
+    await migrate(STORAGE_KEYS.SUBJECTS, storage.getSubjects, storage.saveSubjects);
+    await migrate(STORAGE_KEYS.SESSIONS, storage.getSessions, storage.saveSessions);
+    await migrate(STORAGE_KEYS.GOALS, storage.getGoals, storage.saveGoals);
+
+    console.log('🏁 Guest data migration finished');
+  }
 };

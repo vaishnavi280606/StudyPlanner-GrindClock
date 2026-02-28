@@ -141,7 +141,7 @@ export const MentorSessionsPage: React.FC<MentorSessionsPageProps> = ({ isDarkMo
     finally { setSavingLink(false); }
   };
 
-  const copyToClipboard = (text: string) => { navigator.clipboard.writeText(text).catch(() => {}); };
+  const copyToClipboard = (text: string) => { navigator.clipboard.writeText(text).catch(() => { }); };
 
   const handleCompleteSession = async (id: string) => {
     setActionLoading(true);
@@ -231,11 +231,10 @@ export const MentorSessionsPage: React.FC<MentorSessionsPageProps> = ({ isDarkMo
           <button
             key={f}
             onClick={() => setFilter(f)}
-            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all capitalize ${
-              filter === f
+            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all capitalize ${filter === f
                 ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-md'
                 : dark ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-            }`}
+              }`}
           >
             {f} {f !== 'all' && `(${sessions.filter(s => s.status === f).length})`}
             {f === 'all' && ` (${sessions.length})`}
@@ -252,7 +251,7 @@ export const MentorSessionsPage: React.FC<MentorSessionsPageProps> = ({ isDarkMo
           </div>
         ) : (
           filteredSessions.map((session: any) => {
-            const review = reviews.find((r: any) => r.session_request_id === session.id);
+            const review = reviews.find((r: any) => r.session_id === session.id);
             const isExpanded = expandedId === session.id;
             const isAcceptingThis = actionId === session.id && actionType === 'accept';
             const isRejectingThis = actionId === session.id && actionType === 'reject';
@@ -262,15 +261,14 @@ export const MentorSessionsPage: React.FC<MentorSessionsPageProps> = ({ isDarkMo
               : null;
 
             return (
-              <div key={session.id} className={`rounded-2xl border transition-all duration-300 shadow-sm hover:shadow-lg ${
-                session.status === 'pending'
+              <div key={session.id} className={`rounded-2xl border transition-all duration-300 shadow-sm hover:shadow-lg ${session.status === 'pending'
                   ? dark ? 'bg-slate-800 border-amber-500/30 ring-1 ring-amber-500/10 hover:ring-amber-500/30' : 'bg-white border-amber-200 ring-1 ring-amber-100 hover:shadow-amber-100'
                   : session.status === 'accepted'
                     ? dark ? 'bg-slate-800 border-green-500/20 hover:border-green-500/40' : 'bg-white border-green-200 hover:shadow-green-100'
                     : session.status === 'completed'
                       ? dark ? 'bg-slate-800 border-blue-500/20 hover:border-blue-500/40' : 'bg-white border-blue-200 hover:shadow-blue-100'
                       : dark ? 'bg-slate-800 border-slate-700 hover:border-slate-600' : 'bg-white border-slate-200 hover:border-slate-300'
-              }`}>
+                }`}>
                 {/* Main Row */}
                 <div className="p-6">
                   <div className="flex items-start justify-between gap-4">
@@ -394,9 +392,8 @@ export const MentorSessionsPage: React.FC<MentorSessionsPageProps> = ({ isDarkMo
                   {session.status === 'accepted' && !session.meetingLink && !isEditingLink && (
                     <button
                       onClick={() => { setEditingLinkId(session.id); setEditLinkValue(''); }}
-                      className={`mt-3 w-full flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all border border-dashed ${
-                        dark ? 'border-slate-600 text-slate-400 hover:border-blue-500 hover:text-blue-400' : 'border-slate-300 text-slate-500 hover:border-blue-400 hover:text-blue-500'
-                      }`}
+                      className={`mt-3 w-full flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all border border-dashed ${dark ? 'border-slate-600 text-slate-400 hover:border-blue-500 hover:text-blue-400' : 'border-slate-300 text-slate-500 hover:border-blue-400 hover:text-blue-500'
+                        }`}
                     >
                       <Link2 size={14} /> Add Meeting Link
                     </button>
@@ -485,11 +482,10 @@ export const MentorSessionsPage: React.FC<MentorSessionsPageProps> = ({ isDarkMo
                         </div>
                       )}
                       {session.mentorResponse && (
-                        <div className={`px-4 py-2.5 rounded-xl text-sm ${
-                          session.status === 'accepted'
+                        <div className={`px-4 py-2.5 rounded-xl text-sm ${session.status === 'accepted'
                             ? dark ? 'bg-green-500/5 text-green-300 border border-green-500/10' : 'bg-green-50 text-green-700 border border-green-200'
                             : dark ? 'bg-red-500/5 text-red-300 border border-red-500/10' : 'bg-red-50 text-red-700 border border-red-200'
-                        }`}>
+                          }`}>
                           <span className={`text-xs font-bold block mb-1 ${session.status === 'accepted' ? (dark ? 'text-green-500' : 'text-green-600') : (dark ? 'text-red-500' : 'text-red-600')}`}>Your Response:</span>
                           {session.mentorResponse}
                         </div>

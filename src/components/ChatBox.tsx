@@ -4,6 +4,7 @@ import { Send, X, Smile, Image, Mic, Square, Loader2, Video, History, PanelLeftC
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../utils/supabase';
 import { fetchGroupMembers, addGroupMember, removeGroupMember, searchUsers } from '../utils/supabase-queries';
+import { UserProfile } from '../types';
 
 /* ─────── Sound helpers (reads settings from localStorage) ─────── */
 // Audio file URLs for notification sounds
@@ -33,9 +34,13 @@ function playSendSound() {
         g.gain.setValueAtTime(vol * 0.3, ctx.currentTime);
         g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
         osc.start(); osc.stop(ctx.currentTime + 0.15);
-      } catch (_) {}
+      } catch (err) {
+        console.error('AudioContext beep fallback failed', err);
+      }
     });
-  } catch (_) {}
+  } catch (err) {
+    console.error('Master send sound error', err);
+  }
 }
 
 function playReceiveSound() {
@@ -60,9 +65,13 @@ function playReceiveSound() {
         g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
         o1.start(); o1.stop(ctx.currentTime + 0.12);
         o2.start(ctx.currentTime + 0.08); o2.stop(ctx.currentTime + 0.25);
-      } catch (_) {}
+      } catch (err) {
+        console.error('AudioContext ding fallback failed', err);
+      }
     });
-  } catch (_) {}
+  } catch (err) {
+    console.error('Master receive sound error', err);
+  }
 }
 
 /* ─────── WhatsApp-style Voice Player ─────── */
@@ -72,6 +81,7 @@ function VoiceMessagePlayer({ src, isMe, dark }: { src: string; isMe: boolean; d
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const barsRef = useRef(Array.from({ length: 40 }, () => 0.12 + Math.random() * 0.88));
 
@@ -81,10 +91,17 @@ function VoiceMessagePlayer({ src, isMe, dark }: { src: string; isMe: boolean; d
     const onTime = () => { setCurrentTime(a.currentTime); setProgress(a.duration ? (a.currentTime / a.duration) * 100 : 0); };
     const onMeta = () => { setDuration(a.duration || 0); setLoaded(true); };
     const onEnd = () => { setPlaying(false); setProgress(0); setCurrentTime(0); };
+    const onError = () => { setError(true); setPlaying(false); };
     a.addEventListener('timeupdate', onTime);
     a.addEventListener('loadedmetadata', onMeta);
     a.addEventListener('ended', onEnd);
-    return () => { a.removeEventListener('timeupdate', onTime); a.removeEventListener('loadedmetadata', onMeta); a.removeEventListener('ended', onEnd); };
+    a.addEventListener('error', onError);
+    return () => {
+      a.removeEventListener('timeupdate', onTime);
+      a.removeEventListener('loadedmetadata', onMeta);
+      a.removeEventListener('ended', onEnd);
+      a.removeEventListener('error', onError);
+    };
   }, []);
 
   const toggle = () => {
@@ -136,7 +153,8 @@ function VoiceMessagePlayer({ src, isMe, dark }: { src: string; isMe: boolean; d
           </span>
         </div>
       </div>
-      {!loaded && <Loader2 size={14} className="animate-spin text-amber-500 shrink-0" />}
+      {!loaded && !error && <Loader2 size={14} className="animate-spin text-amber-500 shrink-0" />}
+      {error && <span className="text-[10px] text-red-500 font-bold shrink-0">Failed to load</span>}
     </div>
   );
 }
@@ -149,7 +167,19 @@ interface FriendLike {
   status?: string;
   isGroup?: boolean;
   username?: string;
-  [key: string]: any;
+  role?: string;
+  studyStreak?: number;
+  isMentor?: boolean;
+  fullName?: string;
+  [key: string]: unknown;
+}
+
+export interface GroupMember {
+  groupId: string;
+  userId: string;
+  role: 'admin' | 'member';
+  joinedAt: Date;
+  profile?: UserProfile;
 }
 
 interface ChatBoxProps {
@@ -203,18 +233,18 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   // Group member sidebar state
-  const [groupMembers, setGroupMembers] = useState<any[]>([]);
+  const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [showAddMember, setShowAddMember] = useState(false);
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
-  const [memberSearchResults, setMemberSearchResults] = useState<any[]>([]);
+  const [memberSearchResults, setMemberSearchResults] = useState<UserProfile[]>([]);
   const [searchingMembers, setSearchingMembers] = useState(false);
   const [addingMember, setAddingMember] = useState<string | null>(null);
   const [removingMember, setRemovingMember] = useState<string | null>(null);
   const [currentUserIsAdmin, setCurrentUserIsAdmin] = useState(false);
 
   // Profile card popup state
-  const [profileCard, setProfileCard] = useState<any>(null);
+  const [profileCard, setProfileCard] = useState<any | null>(null);
   const [profileCardLoading, setProfileCardLoading] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -370,7 +400,7 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
       cancelled = true;
       supabase.removeChannel(channel);
     };
-  }, [user?.id, friend?.id]);
+  }, [user?.id, friend?.id, scrollToBottom]);
 
   useEffect(() => { scrollToBottom(); }, [messages]);
 
@@ -387,7 +417,7 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
       try {
         const members = await fetchGroupMembers(friend.id);
         setGroupMembers(members);
-        const me = members.find((m: any) => m.userId === user.id);
+        const me = members.find((m: GroupMember) => m.userId === user.id);
         setCurrentUserIsAdmin(me?.role === 'admin');
       } catch (err) {
         console.error('Error loading group members:', err);
@@ -422,10 +452,11 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
     if (!memberSearchQuery.trim() || !user) return;
     setSearchingMembers(true);
     try {
-      const results = await searchUsers(memberSearchQuery, user.id);
+      const searchData = await searchUsers(memberSearchQuery, user.id);
+      const results = searchData || [];
       // Filter out users already in the group
-      const memberIds = groupMembers.map((m: any) => m.userId);
-      setMemberSearchResults(results.filter((r: any) => !memberIds.includes(r.userId)));
+      const memberIds = groupMembers.map((m: GroupMember) => m.userId);
+      setMemberSearchResults(results.filter((r: UserProfile) => !memberIds.includes(r.userId)));
     } catch (err) {
       console.error('Search error:', err);
     } finally {
@@ -450,20 +481,20 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
           sender_id: user!.id,
           type: 'group_invite',
           content: `You were added to group "${friend.name}"`,
-        }).then(() => {});
+        }).then(() => { });
 
         // Notify all other group members about the new member
-        const addedUser = members.find((m: any) => m.userId === userId);
-        const addedName = addedUser?.profile?.full_name || 'Someone';
-        const otherMembers = members.filter((m: any) => m.userId !== userId && m.userId !== user!.id);
+        const addedUser = members.find((m: GroupMember) => m.userId === userId);
+        const addedName = addedUser?.profile?.fullName || 'Someone';
+        const otherMembers = members.filter((m: GroupMember) => m.userId !== userId && m.userId !== user!.id);
         if (otherMembers.length > 0) {
-          const notifications = otherMembers.map((m: any) => ({
+          const notifications = otherMembers.map((m: GroupMember) => ({
             user_id: m.userId,
             sender_id: user!.id,
             type: 'group_invite',
             content: `${addedName} was added to "${friend.name}"`,
           }));
-          await supabase.from('notifications').insert(notifications).then(() => {});
+          await supabase.from('notifications').insert(notifications).then(() => { });
         }
       }
     } catch (err) {
@@ -479,7 +510,7 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
     try {
       // Get the removed member's name before removing
       const removedMember = groupMembers.find(m => m.userId === userId);
-      const removedName = removedMember?.profile?.full_name || 'Someone';
+      const removedName = removedMember?.profile?.fullName || 'Someone';
 
       const { error } = await removeGroupMember(friend.id, userId);
       if (!error) {
@@ -492,18 +523,18 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
           sender_id: user!.id,
           type: 'group_remove',
           content: `You were removed from group "${friend.name}"`,
-        }).then(() => {});
+        }).then(() => { });
 
         // Notify all remaining group members about the removal
-        const otherMembers = updatedMembers.filter((m: any) => m.userId !== user!.id);
+        const otherMembers = updatedMembers.filter((m: GroupMember) => m.userId !== user!.id);
         if (otherMembers.length > 0) {
-          const notifications = otherMembers.map((m: any) => ({
+          const notifications = otherMembers.map((m: GroupMember) => ({
             user_id: m.userId,
             sender_id: user!.id,
             type: 'group_invite',
             content: `${removedName} was removed from "${friend.name}"`,
           }));
-          await supabase.from('notifications').insert(notifications).then(() => {});
+          await supabase.from('notifications').insert(notifications).then(() => { });
         }
       }
     } catch (err) {
@@ -540,7 +571,7 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
             content: `[${friend.name}] ${content.length > 60 ? content.substring(0, 60) + '...' : content}`,
           }));
           if (notifications.length > 0) {
-            await supabase.from('notifications').insert(notifications).then(() => {});
+            await supabase.from('notifications').insert(notifications).then(() => { });
           }
         }
       } else {
@@ -548,7 +579,7 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
         await supabase.from('notifications').insert({
           user_id: friend.id, sender_id: user.id, type: 'message',
           content: content.length > 80 ? content.substring(0, 80) + '...' : content,
-        }).then(() => {});
+        }).then(() => { });
       }
     } catch (err) {
       console.error('Send error:', err);
@@ -602,7 +633,7 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
         await supabase.from('notifications').insert({
           user_id: friend.id, sender_id: user.id, type: 'message',
           content: mediaType === 'image' ? '📷 Sent a photo' : '🎬 Sent a video',
-        }).then(() => {});
+        }).then(() => { });
       }
     } catch (err) {
       console.error('Media upload error:', err);
@@ -635,7 +666,9 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
           animFrameRef.current = requestAnimationFrame(tick);
         };
         tick();
-      } catch (_) {}
+      } catch (err) {
+        console.error('Audio analyser setup failed', err);
+      }
 
       // Recording duration timer
       setRecordingDuration(0);
@@ -643,7 +676,10 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
         setRecordingDuration(prev => prev + 1);
       }, 1000);
 
-      const mr = new MediaRecorder(stream);
+      const options = { mimeType: 'audio/webm;codecs=opus' };
+      const mr = MediaRecorder.isTypeSupported(options.mimeType)
+        ? new MediaRecorder(stream, options)
+        : new MediaRecorder(stream);
       audioChunksRef.current = [];
       mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       mr.onstop = async () => {
@@ -679,7 +715,7 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
             await supabase.from('notifications').insert({
               user_id: friend.id, sender_id: user!.id, type: 'message',
               content: '🎤 Sent a voice message',
-            }).then(() => {});
+            }).then(() => { });
           }
         } catch (err) {
           setMessages(prev => prev.filter(m => m.id !== tempId));
@@ -753,39 +789,32 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
 
   /* ─── infer content type from URL when column is missing ─── */
   const inferContentType = (content: string, explicit?: string): string => {
-    if (explicit && explicit !== 'text' && explicit !== 'null') return explicit;
+    // If we have a content_type from the DB, use it if it's not text or null
+    if (explicit && explicit !== 'text' && explicit !== 'null') {
+      return explicit;
+    }
+
     if (!content) return 'text';
     const lower = content.toLowerCase().trim();
 
-    // Not a URL — must be text
-    if (!lower.startsWith('http') && !lower.startsWith('blob:')) return 'text';
+    // Not a URL or blob — must be text
+    if (!lower.startsWith('http') && !lower.startsWith('blob:') && !lower.startsWith('data:')) return 'text';
 
-    // Supabase storage bucket folder-based detection (most reliable for our uploads)
+    // blob: URLs are usually voice or image from recording/preview
+    if (lower.startsWith('blob:')) {
+      // Check if there's a hint in the content type or default to image/voice
+      return explicit || 'voice';
+    }
+
     if (lower.includes('chat-files')) {
       if (lower.includes('/voice/')) return 'voice';
       if (lower.includes('/video/')) return 'video';
       if (lower.includes('/chat/')) return 'image';
     }
 
-    // Voice messages stored under voice/ folder or named voice
-    if (lower.includes('/voice/')) return 'voice';
-    // Audio files (.ogg, .webm in voice context)
-    if (lower.match(/\.(ogg)($|\?)/)) return 'voice';
-    if (lower.match(/\.(webm)($|\?)/) && (lower.includes('voice') || lower.includes('audio'))) return 'voice';
-
-    // Video files
-    if (lower.includes('/video/') || lower.match(/\.(mp4|mov|avi)($|\?)/)) return 'video';
-    if (lower.match(/\.(webm)($|\?)/) && lower.includes('/video/')) return 'video';
-
-    // Images
+    if (lower.match(/\.(ogg|mp3|wav|m4a|weba|aac)($|\?)/)) return 'voice';
+    if (lower.match(/\.(mp4|mov|avi|webm)($|\?)/)) return 'video';
     if (lower.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg)($|\?)/)) return 'image';
-
-    // Generic Supabase storage URL without recognizable extension — check folder hints
-    if (lower.includes('supabase') && lower.includes('storage')) {
-      if (lower.match(/\.(mp4|webm|mov)($|\?)/)) return 'video';
-      if (lower.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg)($|\?)/)) return 'image';
-      if (lower.match(/\.(ogg|mp3|wav|m4a)($|\?)/)) return 'voice';
-    }
 
     return 'text';
   };
@@ -798,14 +827,14 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
     const contentType = inferContentType(msg.content || '', msg.content_type);
     const content = msg.content || '';
     let time = '';
-    try { time = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch (_) {}
+    try { time = new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch (err) { console.error('Time format error', err); }
 
     // In groups, resolve sender name from group members list
     let senderLabel = 'You';
     if (!isMe) {
       if (friend.isGroup && groupMembers.length > 0) {
         const member = groupMembers.find(m => m.userId === msg.sender_id);
-        senderLabel = member?.profile?.full_name || msg.senderName || 'Unknown';
+        senderLabel = member?.profile?.fullName || msg.senderName || 'Unknown';
       } else {
         senderLabel = msg.senderName || friend.name;
       }
@@ -815,14 +844,25 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
     const bubbleCls = `max-w-[75%] text-sm relative overflow-hidden ${isMe
       ? 'bg-gradient-to-br from-amber-500 to-orange-500 text-white rounded-2xl rounded-br-sm'
       : dark ? 'bg-slate-700 text-white rounded-2xl rounded-bl-sm border border-slate-600' : 'bg-white text-slate-800 rounded-2xl rounded-bl-sm border border-slate-200 shadow-sm'
-    }`;
+      }`;
 
     const renderContent = () => {
       /* Image with URL */
       if (contentType === 'image' && (content.startsWith('http') || content.startsWith('blob:'))) {
         return (
           <div className="p-1 cursor-pointer group" onClick={() => setImagePreview(content)}>
-            <img src={content} alt="Shared" className="rounded-xl max-h-72 max-w-full object-cover transition-all duration-200 group-hover:brightness-90" loading="lazy" style={{ minWidth: 140, minHeight: 90 }} />
+            <img
+              src={content}
+              alt="Shared"
+              className="rounded-xl max-h-72 max-w-full object-cover transition-all duration-200 group-hover:brightness-90"
+              loading="lazy"
+              style={{ minWidth: 140, minHeight: 90 }}
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.src = 'https://via.placeholder.com/200x150?text=Image+Not+Found';
+                target.onerror = null;
+              }}
+            />
           </div>
         );
       }
@@ -881,24 +921,38 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
     try {
       const { data: profile } = await supabase.from('user_profiles').select('*').eq('user_id', contact.id).single();
       const { data: sessions } = await supabase.from('study_sessions').select('duration_minutes, start_time, created_at, focus_rating, subject_id').eq('user_id', contact.id).order('start_time', { ascending: false });
-      const totalMinutes = sessions?.reduce((s: number, r: any) => s + (r.duration_minutes || 0), 0) || 0;
+      const totalMinutes = sessions?.reduce((s: number, r: { duration_minutes?: number }) => s + (r.duration_minutes || 0), 0) || 0;
       const totalSessions = sessions?.length || 0;
       // compute avg focus rating
-      const focusRatings = sessions?.filter((s: any) => s.focus_rating > 0) || [];
-      const avgFocus = focusRatings.length > 0 ? Math.round((focusRatings.reduce((a: number, s: any) => a + s.focus_rating, 0) / focusRatings.length) * 10) / 10 : 0;
+      const focusRatings = sessions?.filter((s: { focus_rating?: number }) => (s.focus_rating || 0) > 0) || [];
+      const avgFocus = focusRatings.length > 0 ? Math.round((focusRatings.reduce((a: number, s: { focus_rating?: number }) => a + (s.focus_rating || 0), 0) / focusRatings.length) * 10) / 10 : 0;
       // compute unique subjects studied
-      const subjectCount = new Set(sessions?.filter((s: any) => s.subject_id).map((s: any) => s.subject_id) || []).size;
+      const subjectCount = new Set(sessions?.filter((s: { subject_id?: string }) => s.subject_id).map((s: { subject_id?: string }) => s.subject_id) || []).size;
       // Always compute streak from sessions (same algorithm as Dashboard's calculateStreak)
       let streak = 0;
       if (sessions && sessions.length > 0) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
         const sessionDates = new Set<number>();
-        sessions.forEach((s: any) => { const d = new Date(s.start_time || s.created_at); d.setHours(0,0,0,0); sessionDates.add(d.getTime()); });
-        let st = 0; const ch = new Date(); ch.setHours(0,0,0,0);
-        if (sessionDates.has(ch.getTime())) { st = 1; ch.setDate(ch.getDate()-1); } else { ch.setDate(ch.getDate()-1); if (sessionDates.has(ch.getTime())) { st = 1; ch.setDate(ch.getDate()-1); } }
-        while (st > 0 && sessionDates.has(ch.getTime())) { st++; ch.setDate(ch.getDate()-1); }
-        streak = st;
+        sessions.forEach((s: { start_time?: string; created_at?: string }) => {
+          const d = new Date(s.start_time || s.created_at || '');
+          d.setHours(0, 0, 0, 0);
+          sessionDates.add(d.getTime());
+        });
+
+        let currentDate = new Date(today);
+        if (!sessionDates.has(currentDate.getTime())) {
+          currentDate.setDate(currentDate.getDate() - 1);
+        }
+        while (sessionDates.has(currentDate.getTime())) {
+          streak++;
+          currentDate.setDate(currentDate.getDate() - 1);
+        }
       }
-      setProfileCard((prev: any) => prev ? ({
+      // Prefer real DB avatarUrl; skip ui-avatars.com generated ones
+      const dbAvatar = profile?.avatarUrl && !profile.avatarUrl.includes('ui-avatars.com') ? profile.avatarUrl : null;
+      const contactAvatar = contact.avatarUrl && !contact.avatarUrl.includes('ui-avatars.com') ? contact.avatarUrl : null;
+      setProfileCard((prev: UserProfile | null) => prev ? ({
         ...prev,
         bio: profile?.bio || '',
         role: profile?.role || contact.role || 'student',
@@ -911,7 +965,8 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
         avgFocus,
         subjectCount,
         location: profile?.location || profile?.city || '',
-        avatarUrl: profile?.avatar_url || contact.avatarUrl,
+        username: profile?.username || contact.username || '',
+        avatarUrl: dbAvatar || contactAvatar || null,
       }) : null);
     } catch (err) { console.error('Error loading profile card:', err); }
     finally { setProfileCardLoading(false); }
@@ -927,239 +982,246 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
     <div className={`flex h-full rounded-2xl overflow-hidden border ${dark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} shadow-xl`}>
 
       {/* ═══ LEFT SIDEBAR — friends list / group members ═══ */}
-      {sidebarOpen && (
-        <div className={`shrink-0 flex flex-col border-r ${dark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}`} style={{ width: 260 }}>
-          {/* sidebar header */}
-          <div className={`px-4 py-3 border-b ${dark ? 'border-slate-700/50' : 'border-slate-200'}`}>
-            <h3 className={`text-sm font-bold mb-2 ${dark ? 'text-white' : 'text-slate-800'}`}>
-              {friend.isGroup ? (
-                <span className="flex items-center gap-1.5">
-                  <Users size={14} className="text-amber-500" />
-                  Members ({groupMembers.length})
-                </span>
-              ) : 'Chats'}
-            </h3>
-            {!friend.isGroup && (
-              <div className="relative">
-                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
-                <input
-                  type="text"
-                  value={sidebarSearch}
-                  onChange={(e) => setSidebarSearch(e.target.value)}
-                  placeholder="Search..."
-                  className={`w-full pl-8 pr-3 py-1.5 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-amber-500/50 ${dark ? 'bg-slate-800 text-white placeholder:text-slate-500' : 'bg-white text-slate-800 placeholder:text-slate-400 border border-slate-200'}`}
-                />
-              </div>
-            )}
-            {/* Add Member button for group admins */}
-            {friend.isGroup && currentUserIsAdmin && (
-              <button
-                onClick={() => setShowAddMember(!showAddMember)}
-                className={`w-full mt-2 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  showAddMember
-                    ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
-                    : 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20'
-                }`}
-              >
-                {showAddMember ? <X size={12} /> : <UserPlus size={12} />}
-                {showAddMember ? 'Cancel' : 'Add Member'}
-              </button>
-            )}
-          </div>
-
-          {/* Add Member Search Panel */}
-          {friend.isGroup && showAddMember && currentUserIsAdmin && (
-            <div className={`px-3 py-3 border-b ${dark ? 'border-slate-700/50 bg-slate-800/50' : 'border-slate-200 bg-slate-100/50'}`}>
-              <div className="relative mb-2">
-                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
-                <input
-                  type="text"
-                  value={memberSearchQuery}
-                  onChange={(e) => setMemberSearchQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleMemberSearch()}
-                  placeholder="Search users..."
-                  className={`w-full pl-8 pr-16 py-1.5 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-amber-500/50 ${dark ? 'bg-slate-700 text-white placeholder:text-slate-500' : 'bg-white text-slate-800 placeholder:text-slate-400 border border-slate-200'}`}
-                />
-                <button
-                  onClick={handleMemberSearch}
-                  disabled={searchingMembers}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 px-2 py-0.5 bg-amber-500 text-white rounded text-[10px] font-bold hover:bg-amber-600 disabled:opacity-50"
-                >
-                  {searchingMembers ? '...' : 'Search'}
-                </button>
-              </div>
-              {memberSearchResults.length > 0 && (
-                <div className="space-y-1 max-h-32 overflow-y-auto scrollbar-hide">
-                  {memberSearchResults.map((r: any) => (
-                    <div key={r.userId} className={`flex items-center gap-2 p-1.5 rounded-lg ${dark ? 'hover:bg-slate-700' : 'hover:bg-white'}`}>
-                      <img src={r.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(r.fullName || '')}&size=32`} alt="" className="w-7 h-7 rounded-full object-cover" />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1">
-                          <p className={`text-[11px] font-semibold truncate ${dark ? 'text-white' : 'text-slate-800'}`}>{r.fullName}</p>
-                          {r.role === 'mentor' && (
-                            <span className="px-1 py-0.5 bg-purple-500/10 text-purple-500 text-[8px] font-bold rounded-full border border-purple-500/20 shrink-0">
-                              Mentor
-                            </span>
-                          )}
-                        </div>
-                        <p className={`text-[9px] truncate ${dark ? 'text-slate-500' : 'text-slate-400'}`}>@{r.username}</p>
-                      </div>
-                      <button
-                        onClick={() => handleAddMember(r.userId)}
-                        disabled={addingMember === r.userId}
-                        className="p-1 bg-green-500 text-white rounded-md hover:bg-green-600 transition-all disabled:opacity-50"
-                        title="Add to group"
-                      >
-                        {addingMember === r.userId ? <Loader2 size={12} className="animate-spin" /> : <UserPlus size={12} />}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {memberSearchResults.length === 0 && memberSearchQuery && !searchingMembers && (
-                <p className={`text-[10px] text-center py-2 ${dark ? 'text-slate-500' : 'text-slate-400'}`}>No users found</p>
-              )}
+      <div className={`
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0 lg:hidden'} 
+        absolute lg:relative inset-y-0 left-0 z-40 w-72 lg:w-64 shrink-0 flex flex-col border-r transition-transform duration-300 ease-in-out
+        ${dark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200'}
+      `}>
+        {/* sidebar header */}
+        <div className={`px-4 py-3 border-b ${dark ? 'border-slate-700/50' : 'border-slate-200'}`}>
+          <h3 className={`text-sm font-bold mb-2 ${dark ? 'text-white' : 'text-slate-800'}`}>
+            {friend.isGroup ? (
+              <span className="flex items-center gap-1.5">
+                <Users size={14} className="text-amber-500" />
+                Members ({groupMembers.length})
+              </span>
+            ) : 'Chats'}
+          </h3>
+          {!friend.isGroup && (
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+              <input
+                type="text"
+                value={sidebarSearch}
+                onChange={(e) => setSidebarSearch(e.target.value)}
+                placeholder="Search..."
+                className={`w-full pl-8 pr-3 py-1.5 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-amber-500/50 ${dark ? 'bg-slate-800 text-white placeholder:text-slate-500' : 'bg-white text-slate-800 placeholder:text-slate-400 border border-slate-200'}`}
+              />
             </div>
           )}
+          {/* Add Member button for group admins */}
+          {friend.isGroup && currentUserIsAdmin && (
+            <button
+              onClick={() => setShowAddMember(!showAddMember)}
+              className={`w-full mt-2 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${showAddMember
+                ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
+                : 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20'
+                }`}
+            >
+              {showAddMember ? <X size={12} /> : <UserPlus size={12} />}
+              {showAddMember ? 'Cancel' : 'Add Member'}
+            </button>
+          )}
+        </div>
 
-          {/* contacts / members list */}
-          <div className="flex-1 overflow-y-auto scrollbar-hide" style={{ minHeight: 0 }}>
-            {friend.isGroup ? (
-              /* ═══ GROUP MEMBERS LIST ═══ */
-              loadingMembers ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 size={18} className="animate-spin text-amber-500" />
-                </div>
-              ) : (
-                groupMembers.map((member) => {
-                  const isMe = member.userId === user?.id;
-                  const isAdmin = member.role === 'admin';
-                  return (
-                    <div
-                      key={member.userId}
-                      className={`flex items-center gap-3 px-4 py-3 border-l-2 border-transparent transition-all ${
-                        isMe
-                          ? (dark ? 'bg-amber-500/5' : 'bg-amber-50/50')
-                          : (dark ? 'hover:bg-slate-800' : 'hover:bg-slate-100')
-                      }`}
+        {/* Add Member Search Panel */}
+        {friend.isGroup && showAddMember && currentUserIsAdmin && (
+          <div className={`px-3 py-3 border-b ${dark ? 'border-slate-700/50 bg-slate-800/50' : 'border-slate-200 bg-slate-100/50'}`}>
+            <div className="relative mb-2">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+              <input
+                type="text"
+                value={memberSearchQuery}
+                onChange={(e) => setMemberSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleMemberSearch()}
+                placeholder="Search users..."
+                className={`w-full pl-8 pr-16 py-1.5 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-amber-500/50 ${dark ? 'bg-slate-700 text-white placeholder:text-slate-500' : 'bg-white text-slate-800 placeholder:text-slate-400 border border-slate-200'}`}
+              />
+              <button
+                onClick={handleMemberSearch}
+                disabled={searchingMembers}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 px-2 py-0.5 bg-amber-500 text-white rounded text-[10px] font-bold hover:bg-amber-600 disabled:opacity-50"
+              >
+                {searchingMembers ? '...' : 'Search'}
+              </button>
+            </div>
+            {memberSearchResults.length > 0 && (
+              <div className="space-y-1 max-h-32 overflow-y-auto scrollbar-hide">
+                {memberSearchResults.map((r) => (
+                  <div key={r.userId} className={`flex items-center gap-2 p-1.5 rounded-lg ${dark ? 'hover:bg-slate-700' : 'hover:bg-white'}`}>
+                    <img src={r.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(r.fullName || '')}&size=32`} alt="" className="w-7 h-7 rounded-full object-cover" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1">
+                        <p className={`text-[11px] font-semibold truncate ${dark ? 'text-white' : 'text-slate-800'}`}>{r.fullName}</p>
+                        {r.role === 'mentor' && (
+                          <span className="px-1 py-0.5 bg-purple-500/10 text-purple-500 text-[8px] font-bold rounded-full border border-purple-500/20 shrink-0">
+                            Mentor
+                          </span>
+                        )}
+                      </div>
+                      <p className={`text-[9px] truncate ${dark ? 'text-slate-500' : 'text-slate-400'}`}>@{r.username}</p>
+                    </div>
+                    <button
+                      onClick={() => handleAddMember(r.userId)}
+                      disabled={addingMember === r.userId}
+                      className="p-1 bg-green-500 text-white rounded-md hover:bg-green-600 transition-all disabled:opacity-50"
+                      title="Add to group"
                     >
-                      <div className="relative shrink-0">
-                        {member.profile?.avatar_url ? (
-                          <img src={member.profile.avatar_url} alt="" className={`w-9 h-9 rounded-full object-cover border ${dark ? 'border-slate-700' : 'border-slate-200'}`} />
-                        ) : (
-                          <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-orange-500`}>
-                            {(member.profile?.full_name || '?').charAt(0).toUpperCase()}
-                          </div>
-                        )}
-                        {isAdmin && (
-                          <div className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${dark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-                            <Crown size={10} className="text-amber-500" />
-                          </div>
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <h4 className={`text-xs font-semibold truncate ${dark ? 'text-white' : 'text-slate-800'}`}>
-                            {member.profile?.full_name || 'Unknown'}{isMe ? ' (You)' : ''}
-                          </h4>
+                      {addingMember === r.userId ? <Loader2 size={12} className="animate-spin" /> : <UserPlus size={12} />}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {memberSearchResults.length === 0 && memberSearchQuery && !searchingMembers && (
+              <p className={`text-[10px] text-center py-2 ${dark ? 'text-slate-500' : 'text-slate-400'}`}>No users found</p>
+            )}
+          </div>
+        )}
+
+        {/* contacts / members list */}
+        <div className="flex-1 overflow-y-auto scrollbar-hide" style={{ minHeight: 0 }}>
+          {friend.isGroup ? (
+            /* ═══ GROUP MEMBERS LIST ═══ */
+            loadingMembers ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 size={18} className="animate-spin text-amber-500" />
+              </div>
+            ) : (
+              groupMembers.map((member) => {
+                const isMe = member.userId === user?.id;
+                const isAdmin = member.role === 'admin';
+                return (
+                  <div
+                    key={member.userId}
+                    className={`flex items-center gap-3 px-4 py-3 border-l-2 border-transparent transition-all ${isMe
+                      ? (dark ? 'bg-amber-500/5' : 'bg-amber-50/50')
+                      : (dark ? 'hover:bg-slate-800' : 'hover:bg-slate-100')
+                      }`}
+                  >
+                    <div className="relative shrink-0">
+                      {member.profile?.avatarUrl ? (
+                        <img src={member.profile.avatarUrl} alt="" className={`w-9 h-9 rounded-full object-cover border ${dark ? 'border-slate-700' : 'border-slate-200'}`} />
+                      ) : (
+                        <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white bg-gradient-to-br from-amber-500 to-orange-500`}>
+                          {(member.profile?.fullName || '?').charAt(0).toUpperCase()}
                         </div>
-                        <div className="flex items-center gap-1.5">
-                          {isAdmin && (
-                            <span className={`text-[9px] px-1 py-0 rounded font-bold ${dark ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-100 text-amber-600'}`}>
-                              Admin
-                            </span>
-                          )}
-                          <p className={`text-[10px] truncate ${dark ? 'text-slate-500' : 'text-slate-400'}`}>
-                            @{member.profile?.username || 'user'}
-                          </p>
+                      )}
+                      {isAdmin && (
+                        <div className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${dark ? 'bg-slate-900' : 'bg-slate-50'}`}>
+                          <Crown size={10} className="text-amber-500" />
                         </div>
-                      </div>
-                      {/* Admin controls: remove member (not self, not other admins) */}
-                      {currentUserIsAdmin && !isMe && !isAdmin && (
-                        <button
-                          onClick={() => handleRemoveMember(member.userId)}
-                          disabled={removingMember === member.userId}
-                          className={`p-1 rounded-md transition-all shrink-0 ${dark ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-50 text-red-400'} disabled:opacity-50`}
-                          title="Remove from group"
-                        >
-                          {removingMember === member.userId ? <Loader2 size={12} className="animate-spin" /> : <UserMinus size={12} />}
-                        </button>
                       )}
                     </div>
-                  );
-                })
-              )
-            ) : (
-              /* ═══ REGULAR CONTACTS LIST ═══ */
-              <>
-                {filteredContacts.map((c) => {
-              const isActive = c.id === friend.id;
-              const unread = unreadCounts[c.id] || 0;
-              return (
-                <button
-                  key={c.id}
-                  onClick={() => onSelectFriend(c)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-all ${
-                    isActive
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <h4 className={`text-xs font-semibold truncate ${dark ? 'text-white' : 'text-slate-800'}`}>
+                          {member.profile?.fullName || 'Unknown'}{isMe ? ' (You)' : ''}
+                        </h4>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {isAdmin && (
+                          <span className={`text-[9px] px-1 py-0 rounded font-bold ${dark ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-100 text-amber-600'}`}>
+                            Admin
+                          </span>
+                        )}
+                        <p className={`text-[10px] truncate ${dark ? 'text-slate-500' : 'text-slate-400'}`}>
+                          @{member.profile?.username || 'user'}
+                        </p>
+                      </div>
+                    </div>
+                    {/* Admin controls: remove member (not self, not other admins) */}
+                    {currentUserIsAdmin && !isMe && !isAdmin && (
+                      <button
+                        onClick={() => handleRemoveMember(member.userId)}
+                        disabled={removingMember === member.userId}
+                        className={`p-1 rounded-md transition-all shrink-0 ${dark ? 'hover:bg-red-500/20 text-red-400' : 'hover:bg-red-50 text-red-400'} disabled:opacity-50`}
+                        title="Remove from group"
+                      >
+                        {removingMember === member.userId ? <Loader2 size={12} className="animate-spin" /> : <UserMinus size={12} />}
+                      </button>
+                    )}
+                  </div>
+                );
+              })
+            )
+          ) : (
+            /* ═══ REGULAR CONTACTS LIST ═══ */
+            <>
+              {filteredContacts.map((c) => {
+                const isActive = c.id === friend.id;
+                const unread = unreadCounts[c.id] || 0;
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => onSelectFriend(c)}
+                    className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-all ${isActive
                       ? (dark ? 'bg-amber-500/10 border-l-2 border-amber-500' : 'bg-amber-50 border-l-2 border-amber-500')
                       : unread > 0
                         ? (dark
                           ? 'bg-gradient-to-r from-purple-500/15 via-blue-500/10 to-transparent border-l-2 border-purple-500'
                           : 'bg-gradient-to-r from-purple-50 via-blue-50 to-transparent border-l-2 border-purple-500')
                         : (dark ? 'hover:bg-slate-800 border-l-2 border-transparent' : 'hover:bg-slate-100 border-l-2 border-transparent')
-                  }`}
-                >
-                  <div className="relative shrink-0">
-                    {c.avatarUrl ? (
-                      <img
-                        src={c.avatarUrl} alt=""
-                        className={`w-10 h-10 object-cover ${c.isGroup ? 'rounded-lg' : 'rounded-full cursor-pointer hover:ring-2 hover:ring-amber-500/60 transition-all'} border ${unread > 0 ? 'border-purple-500/60' : dark ? 'border-slate-700' : 'border-slate-200'}`}
-                        onClick={(e) => { e.stopPropagation(); openProfileCard(c); }}
-                      />
-                    ) : (
-                      <div
-                        className={`w-10 h-10 flex items-center justify-center text-sm font-bold text-white ${c.isGroup ? 'rounded-lg' : 'rounded-full cursor-pointer hover:ring-2 hover:ring-amber-500/60 transition-all'} bg-gradient-to-br from-amber-500 to-orange-500`}
-                        onClick={(e) => { e.stopPropagation(); openProfileCard(c); }}
-                      >
-                        {c.name.charAt(0).toUpperCase()}
-                      </div>
-                    )}
-                    {!c.isGroup && c.status !== 'offline' && (
-                      <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 ${dark ? 'border-slate-900' : 'border-slate-50'} ${c.status === 'studying' ? 'bg-blue-500' : 'bg-green-500'}`} />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between">
-                      <h4 className={`text-sm font-semibold truncate ${isActive ? 'text-amber-500' : dark ? 'text-white' : 'text-slate-800'}`}>
-                        {c.name}
-                      </h4>
-                      <div className="flex items-center gap-1.5 shrink-0 ml-1">
-                        {!c.isGroup && (c.studyStreak ?? 0) > 0 && (
-                          <span className={`flex items-center gap-0.5 text-[10px] font-bold ${dark ? 'text-orange-400' : 'text-orange-500'}`}>
-                            <Flame size={11} className="text-orange-500" />{c.studyStreak}
-                          </span>
-                        )}
-                        {unread > 0 && (
-                          <span className="min-w-[22px] h-5 flex items-center justify-center px-1 text-[10px] font-bold text-white bg-gradient-to-r from-purple-500 to-blue-500 rounded-full shadow-sm shadow-purple-500/30">{unread}</span>
-                        )}
-                      </div>
+                      }`}
+                  >
+                    <div className="relative shrink-0">
+                      {c.avatarUrl ? (
+                        <img
+                          src={c.avatarUrl} alt=""
+                          className={`w-10 h-10 object-cover ${c.isGroup ? 'rounded-lg' : 'rounded-full cursor-pointer hover:ring-2 hover:ring-amber-500/60 transition-all'} border ${unread > 0 ? 'border-purple-500/60' : dark ? 'border-slate-700' : 'border-slate-200'}`}
+                          onClick={(e) => { e.stopPropagation(); openProfileCard(c); }}
+                        />
+                      ) : (
+                        <div
+                          className={`w-10 h-10 flex items-center justify-center text-sm font-bold text-white ${c.isGroup ? 'rounded-lg' : 'rounded-full cursor-pointer hover:ring-2 hover:ring-amber-500/60 transition-all'} bg-gradient-to-br from-amber-500 to-orange-500`}
+                          onClick={(e) => { e.stopPropagation(); openProfileCard(c); }}
+                        >
+                          {c.name.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      {!c.isGroup && c.status !== 'offline' && (
+                        <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 ${dark ? 'border-slate-900' : 'border-slate-50'} ${c.status === 'studying' ? 'bg-blue-500' : 'bg-green-500'}`} />
+                      )}
                     </div>
-                    <p className={`text-[11px] truncate ${unread > 0 ? 'text-purple-400 font-medium' : dark ? 'text-slate-500' : 'text-slate-400'}`}>
-                      {unread > 0 ? `${unread} new message${unread > 1 ? 's' : ''}` : c.isGroup ? 'Grp' : (c.isMentor || c.role === 'mentor') ? 'Mentor' : `@${c.username || 'user'}`}
-                    </p>
-                  </div>
-                </button>
-              );
-            })}
-            {filteredContacts.length === 0 && (
-              <div className="py-8 text-center">
-                <p className={`text-xs ${dark ? 'text-slate-500' : 'text-slate-400'}`}>No contacts found</p>
-              </div>
-            )}
-              </>
-            )}
-          </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between">
+                        <h4 className={`text-sm font-semibold truncate ${isActive ? 'text-amber-500' : dark ? 'text-white' : 'text-slate-800'}`}>
+                          {c.name}
+                        </h4>
+                        <div className="flex items-center gap-1.5 shrink-0 ml-1">
+                          {!c.isGroup && (c.studyStreak ?? 0) > 0 && (
+                            <span className={`flex items-center gap-0.5 text-[10px] font-bold ${dark ? 'text-orange-400' : 'text-orange-500'}`}>
+                              <Flame size={11} className="text-orange-500" />{c.studyStreak}
+                            </span>
+                          )}
+                          {unread > 0 && (
+                            <span className="min-w-[22px] h-5 flex items-center justify-center px-1 text-[10px] font-bold text-white bg-gradient-to-r from-purple-500 to-blue-500 rounded-full shadow-sm shadow-purple-500/30">{unread}</span>
+                          )}
+                        </div>
+                      </div>
+                      <p className={`text-[11px] truncate ${unread > 0 ? 'text-purple-400 font-medium' : dark ? 'text-slate-500' : 'text-slate-400'}`}>
+                        {unread > 0 ? `${unread} new message${unread > 1 ? 's' : ''}` : c.isGroup ? 'Grp' : (c.isMentor || c.role === 'mentor') ? 'Mentor' : `@${c.username || 'user'}`}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+              {filteredContacts.length === 0 && (
+                <div className="py-8 text-center">
+                  <p className={`text-xs ${dark ? 'text-slate-500' : 'text-slate-400'}`}>No contacts found</p>
+                </div>
+              )}
+            </>
+          )}
         </div>
+      </div>
+
+      {/* Mobile Sidebar Backdrop */}
+      {sidebarOpen && (
+        <div
+          className="lg:hidden fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-30"
+          onClick={() => setSidebarOpen(false)}
+        />
       )}
 
       {/* ═══ CHAT AREA ═══ */}
@@ -1255,14 +1317,14 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
             ...(chatBg && chatBg !== '__profile__' ? {
               backgroundAttachment: 'fixed',
             } : {}),
-            ...(chatBg === '__profile__' ? {
-              backgroundImage: friend.avatarUrl
-                ? `linear-gradient(${dark ? 'rgba(15,23,42,0.82)' : 'rgba(248,250,252,0.82)'}, ${dark ? 'rgba(15,23,42,0.82)' : 'rgba(248,250,252,0.82)'}), url(${friend.avatarUrl})`
-                : undefined,
+            ...(chatBg === '__profile__' && friend.avatarUrl && !friend.avatarUrl.includes('ui-avatars.com') ? {
+              backgroundImage: `url(${friend.avatarUrl})`,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
               backgroundAttachment: 'fixed',
-              backgroundColor: !friend.avatarUrl ? (dark ? '#0f172a' : '#f8fafc') : undefined,
+              backgroundColor: dark ? '#0f172a' : '#f8fafc',
+            } : chatBg === '__profile__' ? {
+              backgroundColor: dark ? '#0f172a' : '#f8fafc',
             } : {}),
           }}
         >
@@ -1397,10 +1459,10 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
 
       {/* ═══ PROFILE CARD POPUP (portal to body to escape overflow clipping) ═══ */}
       {profileCard && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setProfileCard(null)} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in" onClick={() => setProfileCard(null)}>
           <div
             onClick={e => e.stopPropagation()}
-            className={`w-full max-w-sm mx-4 rounded-3xl overflow-hidden border shadow-2xl animate-fade-in ${dark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}
+            className={`w-full max-w-sm rounded-[2.5rem] overflow-hidden border shadow-2xl ${dark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}
           >
             {/* Banner + Avatar */}
             <div className="relative h-36 bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500">
@@ -1412,9 +1474,14 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
                 <X size={16} />
               </button>
               <div className="absolute -bottom-[4.5rem] left-1/2 -translate-x-1/2">
-                {profileCard.avatarUrl ? (
-                  <img src={profileCard.avatarUrl} alt="" className="w-36 h-36 rounded-full object-cover border-4 shadow-lg cursor-pointer hover:ring-4 hover:ring-white/30 transition-all" style={{ borderColor: dark ? '#1e293b' : '#ffffff' }}
+                {profileCard.avatarUrl && !profileCard.avatarUrl.includes('ui-avatars.com') ? (
+                  <img
+                    src={profileCard.avatarUrl}
+                    alt=""
+                    className="w-36 h-36 rounded-full object-cover border-4 shadow-lg cursor-pointer hover:ring-4 hover:ring-white/30 transition-all"
+                    style={{ borderColor: dark ? '#1e293b' : '#ffffff' }}
                     onClick={(e) => { e.stopPropagation(); setImagePreview(profileCard.avatarUrl); }}
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                   />
                 ) : (
                   <div className="w-36 h-36 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-4xl font-bold text-white border-4 shadow-lg" style={{ borderColor: dark ? '#1e293b' : '#ffffff' }}>
@@ -1427,7 +1494,7 @@ export function ChatBox({ friend, friends, groups, onClose, onSelectFriend, onSt
             {/* Info */}
             <div className="pt-20 pb-5 px-6 text-center">
               <h3 className={`text-xl font-bold ${dark ? 'text-white' : 'text-slate-900'}`}>{profileCard.name}</h3>
-              <p className={`text-sm mt-0.5 ${dark ? 'text-slate-400' : 'text-slate-500'}`}>@{profileCard.username || 'user'}</p>
+              <p className={`text-sm mt-0.5 ${dark ? 'text-slate-400' : 'text-slate-500'}`}>@{profileCard.username || profileCard.id?.slice(0, 8) || 'user'}</p>
 
               {/* Role Badge */}
               <div className="flex items-center justify-center gap-2 mt-2">

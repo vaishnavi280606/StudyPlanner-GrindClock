@@ -2106,7 +2106,7 @@ export const MentorConnect: React.FC<MentorConnectProps> = ({
                             <div className="flex-1">
                               <div className="flex items-center justify-between mb-1">
                                 <span className={`font-medium ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                                  {review.student?.fullName || 'Anonymous'}
+                                  {review.student?.fullName || (review.student?.username ? `@${review.student.username}` : 'Anonymous Student')}
                                 </span>
                                 <span className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
                                   {new Date(review.createdAt).toLocaleDateString()}

@@ -51,25 +51,25 @@ export function SessionHistory({ sessions, subjects, isDarkMode }: SessionHistor
               key={session.id}
               className={`rounded-xl p-6 shadow-md border hover:shadow-lg transition-all ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}
             >
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
                   <div
-                    className="w-4 h-4 rounded-full flex-shrink-0"
+                    className="w-4 h-4 rounded-full flex-shrink-0 mt-1"
                     style={{ backgroundColor: getSubjectColor(session.subjectId) }}
                   />
                   <div>
                     <h3 className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                       {getSubjectName(session.subjectId)}
                     </h3>
-                    <div className={`flex items-center gap-2 text-sm mt-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+                    <div className={`flex flex-wrap items-center gap-2 text-sm mt-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
                       <Calendar size={14} />
                       <span>{formatDate(session.startTime)}</span>
-                      <span>•</span>
+                      <span className="hidden sm:inline">•</span>
                       <span>{formatTime(session.startTime)}</span>
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-4 border-t sm:border-t-0 pt-3 sm:pt-0">
                   <div className={`flex items-center gap-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                     <Clock size={16} />
                     <span className="text-sm font-medium">

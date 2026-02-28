@@ -162,8 +162,8 @@ export function Dashboard({ subjects, sessions, goals, isDarkMode }: DashboardPr
             </div>
           </div>
         </div>
-        <div className="overflow-x-auto pb-2">
-          <div className="grid grid-cols-7 gap-2 min-w-[500px]">
+        <div className="overflow-x-auto pb-2 -mx-2 px-2 scrollbar-hide">
+          <div className="grid grid-cols-7 gap-1 md:gap-2 min-w-[600px] lg:min-w-0">
             {weeklyProgress.map((day, idx) => (
               <div key={idx} className="text-center">
                 <div className={`text-xs font-medium mb-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>

@@ -1,4 +1,5 @@
-import { supabase } from './supabase';
+import { supabase as supabaseClient } from './supabase';
+export const supabase = supabaseClient;
 import { Mentor, Friend, UserProfile } from '../types';
 
 export const fetchMentors = async (): Promise<Mentor[]> => {
@@ -544,7 +545,16 @@ export const fetchGroupMembers = async (groupId: string) => {
         userId: m.user_id,
         role: m.role,
         joinedAt: new Date(m.joined_at),
-        profile: m.profile
+        profile: m.profile ? {
+            id: m.profile.id,
+            userId: m.profile.user_id,
+            fullName: m.profile.full_name,
+            avatarUrl: m.profile.avatar_url,
+            username: m.profile.username,
+            role: m.profile.role,
+            createdAt: new Date(m.profile.created_at),
+            updatedAt: new Date(m.profile.updated_at)
+        } : undefined
     }));
 };
 
@@ -701,8 +711,8 @@ export const fetchMentorsFromProfiles = async (): Promise<Mentor[]> => {
         bio: m.experience || '',
         skills: [],
         languages: ['English'],
-        rating: 4.5,
-        totalReviews: 0,
+        rating: m.rating || 0,
+        totalReviews: m.total_reviews || 0,
         isVerified: true
     }));
 };
@@ -804,7 +814,8 @@ export const acceptSessionRequest = async (requestId: string, responseText: stri
             reqData.student_id,
             reqData.mentor_id,
             'session_accepted',
-            `Your session request "${reqData.topic}" has been accepted!${meetingLink ? ' Meeting link provided.' : ''}`
+            `Your session request "${reqData.topic}" has been accepted!${meetingLink ? ' Meeting link provided.' : ''}`,
+            { sessionId: requestId, topic: reqData.topic }
         );
     }
 };
@@ -831,7 +842,8 @@ export const rejectSessionRequest = async (requestId: string, responseText: stri
             reqData.student_id,
             reqData.mentor_id,
             'session_rejected',
-            `Your session request "${reqData.topic}" was declined.${responseText ? ' Reason: ' + responseText : ''}`
+            `Your session request "${reqData.topic}" was declined.${responseText ? ' Reason: ' + responseText : ''}`,
+            { sessionId: requestId, topic: reqData.topic }
         );
     }
 };
@@ -955,6 +967,14 @@ export const fetchMentorReviews = async (mentorId: string): Promise<any[]> => {
                     studentName: profile?.full_name,
                     studentAvatarUrl: profile?.avatar_url,
                     studentUsername: profile?.username,
+                    reviewText: r.review_text,
+                    createdAt: new Date(r.created_at),
+                    studentId: r.student_id,
+                    student: {
+                        fullName: profile?.full_name,
+                        avatarUrl: profile?.avatar_url,
+                        username: profile?.username
+                    }
                 };
             });
         }
@@ -966,7 +986,15 @@ export const fetchMentorReviews = async (mentorId: string): Promise<any[]> => {
         ...r,
         studentName: r.student_profile?.full_name,
         studentAvatarUrl: r.student_profile?.avatar_url,
-        studentUsername: r.student_profile?.username
+        studentUsername: r.student_profile?.username,
+        reviewText: r.review_text,
+        createdAt: new Date(r.created_at),
+        studentId: r.student_id,
+        student: {
+            fullName: r.student_profile?.full_name,
+            avatarUrl: r.student_profile?.avatar_url,
+            username: r.student_profile?.username
+        }
     }));
 };
 
@@ -1065,8 +1093,9 @@ export const createSessionRequest = async (request: any) => {
         await createNotification(
             request.mentor_id,
             request.student_id,
-            'message', // Reuse message type or add session type
-            `New session request for: ${request.topic}`
+            'session_request',
+            `New session request for: ${request.topic}`,
+            { sessionId: data.id, topic: request.topic }
         );
     }
 
@@ -1088,6 +1117,18 @@ export const fetchSessionRequests = async (userId: string, role: 'student' | 'me
 
     if (!data || data.length === 0) return [];
 
+    // Fetch reviews for these sessions
+    const sessionIds = data.map(s => s.id);
+    const { data: reviews } = await supabase
+        .from('mentor_reviews')
+        .select('*')
+        .in('session_id', sessionIds);
+
+    const reviewMap = new Map<string, any>();
+    if (reviews) {
+        reviews.forEach(r => reviewMap.set(r.session_id, r));
+    }
+
     // Collect unique mentor and student IDs to batch-fetch profiles
     const mentorIds = [...new Set(data.map(s => s.mentor_id).filter(Boolean))];
     const studentIds = [...new Set(data.map(s => s.student_id).filter(Boolean))];
@@ -1107,6 +1148,7 @@ export const fetchSessionRequests = async (userId: string, role: 'student' | 'me
     return data.map(s => {
         const mentorProfile = profileMap.get(s.mentor_id);
         const studentProfile = profileMap.get(s.student_id);
+        const review = reviewMap.get(s.id);
         return {
             ...s,
             mentorId: s.mentor_id,
@@ -1123,7 +1165,14 @@ export const fetchSessionRequests = async (userId: string, role: 'student' | 'me
             studentProfile: {
                 fullName: studentProfile?.full_name,
                 avatarUrl: studentProfile?.avatar_url
-            }
+            },
+            review: review ? {
+                id: review.id,
+                rating: review.rating,
+                reviewText: review.review_text,
+                createdAt: new Date(review.created_at),
+                studentId: review.student_id
+            } : null
         };
     });
 };
@@ -1168,7 +1217,7 @@ export const completeSessionRequest = async (requestId: string) => {
     return { error };
 };
 
-export const cancelSessionRequest = async (requestId: string) => {
+export const cancelSessionRequest = async (requestId: string, role?: 'student' | 'mentor') => {
     const { data: reqData } = await supabase
         .from('session_requests')
         .select('student_id, mentor_id, topic')
@@ -1186,13 +1235,15 @@ export const cancelSessionRequest = async (requestId: string) => {
             reqData.student_id,
             reqData.mentor_id,
             'session_cancelled',
-            `Session "${reqData.topic}" has been cancelled.`
+            `Session "${reqData.topic}" has been cancelled.`,
+            { sessionId: requestId, topic: reqData.topic }
         );
         await createNotification(
             reqData.mentor_id,
             reqData.student_id,
             'session_cancelled',
-            `Session "${reqData.topic}" has been cancelled by the student.`
+            `Session "${reqData.topic}" has been cancelled by the ${role || 'other party'}.`,
+            { sessionId: requestId, topic: reqData.topic }
         );
     }
 
@@ -1214,7 +1265,7 @@ export const submitMentorReview = async (mentorId: string, studentId: string, re
         .insert({
             mentor_id: mentorId,
             student_id: studentId,
-            session_request_id: requestId,
+            session_id: requestId,
             rating,
             review_text: reviewText
         });
@@ -1265,6 +1316,40 @@ export const isSessionStartingNow = (date: string, time: string): boolean => {
     const now = new Date();
     const diffMins = Math.abs((sessionDate.getTime() - now.getTime()) / (1000 * 60));
     return diffMins <= 5; // Within 5 minutes
+};
+
+export const isSessionSoon = (date: string, time: string): boolean => {
+    const sessionDate = new Date(`${date}T${time}`);
+    const now = new Date();
+    const diffMins = (sessionDate.getTime() - now.getTime()) / (1000 * 60);
+    return diffMins > 0 && diffMins <= 60; // Within 1 hour
+};
+
+export const isSessionIn10Minutes = (date: string, time: string): boolean => {
+    const sessionDate = new Date(`${date}T${time}`);
+    const now = new Date();
+    const diffMins = (sessionDate.getTime() - now.getTime()) / (1000 * 60);
+    return diffMins > 0 && diffMins <= 10;
+};
+
+export const isSessionWithin30Minutes = (date: string, time: string): boolean => {
+    return isSessionIn30Minutes(date, time);
+};
+
+export const sendSessionReminderNotification = async (
+    sessionId: string,
+    mentorId: string,
+    studentId: string,
+    topic: string,
+    minutesLeft: number
+) => {
+    const message = `Reminder: Your session "${topic}" starts in ${minutesLeft} minutes.`;
+
+    // Notify both mentor and student
+    await Promise.all([
+        createNotification(mentorId, studentId, 'session_reminder', message, { sessionId, topic, minutesLeft }),
+        createNotification(studentId, mentorId, 'session_reminder', message, { sessionId, topic, minutesLeft })
+    ]);
 };
 
 export const fetchCallHistory = async (userId: string, friendId: string) => {

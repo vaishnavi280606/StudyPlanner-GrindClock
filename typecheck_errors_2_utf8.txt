@@ -1,0 +1,105 @@
+﻿
+> vite-react-typescript-starter@0.0.0 typecheck
+> tsc --noEmit -p tsconfig.app.json
+
+src/components/CompletionTracker.tsx(2,20): error TS6133: 'TrendingUp' is declared but its value is never read.
+src/components/CompletionTracker.tsx(2,40): error TS6133: 'Target' is declared but its value is never read.
+src/components/CompletionTracker.tsx(2,48): error TS6133: 'BookOpen' is declared but its value is never read.
+src/components/CompletionTracker.tsx(257,41): error TS6133: 'index' is declared but its value is never read.
+src/components/DoubtSolver.tsx(2,24): error TS6133: 'Search' is declared but its value is never read.
+src/components/DoubtSolver.tsx(2,65): error TS6133: 'BarChart3' is declared but its value is never read.
+src/components/DoubtSolver.tsx(2,76): error TS6133: 'Calendar' is declared but its value is never read.
+src/components/DoubtSolver.tsx(2,86): error TS6133: 'Flame' is declared but its value is never read.
+src/components/DoubtSolver.tsx(2,111): error TS6133: 'Globe' is declared but its value is never read.
+src/components/DoubtSolver.tsx(2,126): error TS6133: 'Code' is declared but its value is never read.
+src/components/DoubtSolver.tsx(2,132): error TS6133: 'PenTool' is declared but its value is never read.
+src/components/DoubtSolver.tsx(2,141): error TS6133: 'ArrowRight' is declared but its value is never read.
+src/components/DoubtSolver.tsx(47,7): error TS6133: 'categories' is declared but its value is never read.
+src/components/DoubtSolver.tsx(128,28): error TS6133: 'setSelectedCategory' is declared but its value is never read.
+src/components/GoalReminderPopup.tsx(2,33): error TS6133: 'Calendar' is declared but its value is never read.
+src/components/MentorAnalyticsDashboard.tsx(14,10): error TS6133: 'BarChart3' is declared but its value is never read.
+src/components/MentorAnalyticsDashboard.tsx(14,34): error TS6133: 'TrendingUp' is declared but its value is never read.
+src/components/MentorAnalyticsDashboard.tsx(14,46): error TS6133: 'DollarSign' is declared but its value is never read.
+src/components/MentorAnalyticsDashboard.tsx(14,65): error TS6133: 'Award' is declared but its value is never read.
+src/components/MentorAnalyticsDashboard.tsx(89,31): error TS6133: 'profile' is declared but its value is never read.
+src/components/MentorConnect.tsx(411,9): error TS6133: 'allDomains' is declared but its value is never read.
+src/components/MentorDashboard.tsx(270,60): error TS2554: Expected 1 arguments, but got 2.
+src/components/MentorDashboard.tsx(279,43): error TS2554: Expected 1 arguments, but got 2.
+src/components/MentorOfferingsPage.tsx(4,35): error TS6133: 'FileText' is declared but its value is never read.
+src/components/SessionReminders.tsx(4,33): error TS2305: Module '"../utils/supabase-queries"' has no exported member 'isSessionSoon'.
+src/components/SessionReminders.tsx(4,86): error TS2724: '"../utils/supabase-queries"' has no exported member named 'isSessionIn10Minutes'. Did you mean 'isSessionIn30Minutes'?
+src/components/SessionReminders.tsx(4,108): error TS2305: Module '"../utils/supabase-queries"' has no exported member 'sendSessionReminderNotification'.
+src/components/SessionReminders.tsx(4,141): error TS2724: '"../utils/supabase-queries"' has no exported member named 'isSessionWithin30Minutes'. Did you mean 'isSessionIn30Minutes'?
+src/components/StudyCalendar.tsx(2,43): error TS6133: 'Clock' is declared but its value is never read.
+src/components/StudyCalendar.tsx(2,50): error TS6133: 'Target' is declared but its value is never read.
+src/components/StudyCalendar.tsx(31,72): error TS6133: 'onScheduleSession' is declared but its value is never read.
+src/components/StudyCalendar.tsx(364,26): error TS6133: 'date' is declared but its value is never read.
+src/components/StudyStreaks.tsx(26,5): error TS2322: Type 'LucideIcon' is not assignable to type 'ComponentType<{ size?: number | undefined; className?: string | undefined; }>'.
+  Type 'ForwardRefExoticComponent<LucideProps>' is not assignable to type 'FunctionComponent<{ size?: number | undefined; className?: string | undefined; }>'.
+    Types of property 'propTypes' are incompatible.
+      Type 'WeakValidationMap<LucideProps> | undefined' is not assignable to type 'WeakValidationMap<{ size?: number | undefined; className?: string | undefined; }> | undefined'.
+        Type 'WeakValidationMap<LucideProps>' is not assignable to type 'WeakValidationMap<{ size?: number | undefined; className?: string | undefined; }>'.
+          Types of property 'size' are incompatible.
+            Type 'Validator<string | number | null | undefined> | undefined' is not assignable to type 'Validator<number | null | undefined> | undefined'.
+              Type 'Validator<string | number | null | undefined>' is not assignable to type 'Validator<number | null | undefined>'.
+                Type 'string | number | null | undefined' is not assignable to type 'number | null | undefined'.
+                  Type 'string' is not assignable to type 'number'.
+src/components/StudyStreaks.tsx(34,5): error TS2322: Type 'LucideIcon' is not assignable to type 'ComponentType<{ size?: number | undefined; className?: string | undefined; }>'.
+  Type 'ForwardRefExoticComponent<LucideProps>' is not assignable to type 'FunctionComponent<{ size?: number | undefined; className?: string | undefined; }>'.
+    Types of property 'propTypes' are incompatible.
+      Type 'WeakValidationMap<LucideProps> | undefined' is not assignable to type 'WeakValidationMap<{ size?: number | undefined; className?: string | undefined; }> | undefined'.
+        Type 'WeakValidationMap<LucideProps>' is not assignable to type 'WeakValidationMap<{ size?: number | undefined; className?: string | undefined; }>'.
+          Types of property 'size' are incompatible.
+            Type 'Validator<string | number | null | undefined> | undefined' is not assignable to type 'Validator<number | null | undefined> | undefined'.
+              Type 'Validator<string | number | null | undefined>' is not assignable to type 'Validator<number | null | undefined>'.
+                Type 'string | number | null | undefined' is not assignable to type 'number | null | undefined'.
+                  Type 'string' is not assignable to type 'number'.
+src/components/StudyStreaks.tsx(43,5): error TS2322: Type 'LucideIcon' is not assignable to type 'ComponentType<{ size?: number | undefined; className?: string | undefined; }>'.
+  Type 'ForwardRefExoticComponent<LucideProps>' is not assignable to type 'FunctionComponent<{ size?: number | undefined; className?: string | undefined; }>'.
+    Types of property 'propTypes' are incompatible.
+      Type 'WeakValidationMap<LucideProps> | undefined' is not assignable to type 'WeakValidationMap<{ size?: number | undefined; className?: string | undefined; }> | undefined'.
+        Type 'WeakValidationMap<LucideProps>' is not assignable to type 'WeakValidationMap<{ size?: number | undefined; className?: string | undefined; }>'.
+          Types of property 'size' are incompatible.
+            Type 'Validator<string | number | null | undefined> | undefined' is not assignable to type 'Validator<number | null | undefined> | undefined'.
+              Type 'Validator<string | number | null | undefined>' is not assignable to type 'Validator<number | null | undefined>'.
+                Type 'string | number | null | undefined' is not assignable to type 'number | null | undefined'.
+                  Type 'string' is not assignable to type 'number'.
+src/components/StudyStreaks.tsx(52,5): error TS2322: Type 'LucideIcon' is not assignable to type 'ComponentType<{ size?: number | undefined; className?: string | undefined; }>'.
+  Type 'ForwardRefExoticComponent<LucideProps>' is not assignable to type 'FunctionComponent<{ size?: number | undefined; className?: string | undefined; }>'.
+    Types of property 'propTypes' are incompatible.
+      Type 'WeakValidationMap<LucideProps> | undefined' is not assignable to type 'WeakValidationMap<{ size?: number | undefined; className?: string | undefined; }> | undefined'.
+        Type 'WeakValidationMap<LucideProps>' is not assignable to type 'WeakValidationMap<{ size?: number | undefined; className?: string | undefined; }>'.
+          Types of property 'size' are incompatible.
+            Type 'Validator<string | number | null | undefined> | undefined' is not assignable to type 'Validator<number | null | undefined> | undefined'.
+              Type 'Validator<string | number | null | undefined>' is not assignable to type 'Validator<number | null | undefined>'.
+                Type 'string | number | null | undefined' is not assignable to type 'number | null | undefined'.
+                  Type 'string' is not assignable to type 'number'.
+src/components/StudyStreaks.tsx(60,5): error TS2322: Type 'LucideIcon' is not assignable to type 'ComponentType<{ size?: number | undefined; className?: string | undefined; }>'.
+  Type 'ForwardRefExoticComponent<LucideProps>' is not assignable to type 'FunctionComponent<{ size?: number | undefined; className?: string | undefined; }>'.
+    Types of property 'propTypes' are incompatible.
+      Type 'WeakValidationMap<LucideProps> | undefined' is not assignable to type 'WeakValidationMap<{ size?: number | undefined; className?: string | undefined; }> | undefined'.
+        Type 'WeakValidationMap<LucideProps>' is not assignable to type 'WeakValidationMap<{ size?: number | undefined; className?: string | undefined; }>'.
+          Types of property 'size' are incompatible.
+            Type 'Validator<string | number | null | undefined> | undefined' is not assignable to type 'Validator<number | null | undefined> | undefined'.
+              Type 'Validator<string | number | null | undefined>' is not assignable to type 'Validator<number | null | undefined>'.
+                Type 'string | number | null | undefined' is not assignable to type 'number | null | undefined'.
+                  Type 'string' is not assignable to type 'number'.
+src/components/StudyStreaks.tsx(69,5): error TS2322: Type 'LucideIcon' is not assignable to type 'ComponentType<{ size?: number | undefined; className?: string | undefined; }>'.
+  Type 'ForwardRefExoticComponent<LucideProps>' is not assignable to type 'FunctionComponent<{ size?: number | undefined; className?: string | undefined; }>'.
+    Types of property 'propTypes' are incompatible.
+      Type 'WeakValidationMap<LucideProps> | undefined' is not assignable to type 'WeakValidationMap<{ size?: number | undefined; className?: string | undefined; }> | undefined'.
+        Type 'WeakValidationMap<LucideProps>' is not assignable to type 'WeakValidationMap<{ size?: number | undefined; className?: string | undefined; }>'.
+          Types of property 'size' are incompatible.
+            Type 'Validator<string | number | null | undefined> | undefined' is not assignable to type 'Validator<number | null | undefined> | undefined'.
+              Type 'Validator<string | number | null | undefined>' is not assignable to type 'Validator<number | null | undefined>'.
+                Type 'string | number | null | undefined' is not assignable to type 'number | null | undefined'.
+                  Type 'string' is not assignable to type 'number'.
+src/components/StudyTechniques.tsx(2,53): error TS6133: 'Zap' is declared but its value is never read.
+src/components/SubjectManager.tsx(2,48): error TS6133: 'TrendingUp' is declared but its value is never read.
+src/components/UserProfile.tsx(2,16): error TS6133: 'ChevronDown' is declared but its value is never read.
+src/components/UserProfile.tsx(2,52): error TS6133: 'CheckCircle' is declared but its value is never read.
+src/components/UserProfile.tsx(26,43): error TS6133: 'variant' is declared but its value is never read.
+src/components/VideoCall.tsx(552,61): error TS2339: Property 'supabase' does not exist on type 'typeof import("D:/Projects/StudyPlanner-GrindClock-main/src/utils/supabase-queries")'.
+src/components/VideoCall.tsx(575,102): error TS2345: Argument of type '{ duration: number; senderName: string; }' is not assignable to parameter of type 'string'.
+src/components/VideoCall.tsx(600,73): error TS6133: 'q' is declared but its value is never read.
+src/utils/database.ts(2,44): error TS6133: 'ScheduleSlot' is declared but its value is never read.

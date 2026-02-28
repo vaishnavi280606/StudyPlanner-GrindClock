@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Users, Zap, Trophy, MessageCircle, UserPlus, Video, Search, Loader2, X, Check, UserCheck, Plus, LayoutGrid, GraduationCap, Phone, Flame, Clock, BookOpen, Calendar, Brain, MapPin, Target } from 'lucide-react';
+import { Users, Trophy, MessageCircle, UserPlus, Video, Search, Loader2, X, Check, UserCheck, Plus, LayoutGrid, GraduationCap, Phone, Flame, Clock, BookOpen, Calendar, Brain, MapPin, Target } from 'lucide-react';
 import { ChatBox } from './ChatBox';
 import { Friend, UserProfile, Group } from '../types';
 import { fetchFriends, searchUsers, sendFriendRequest, fetchUnreadCounts, subscribeToNotifications, fetchUserGroups, createGroup, fetchSessionRequests, fetchGroupMembers } from '../utils/supabase-queries';
@@ -10,11 +10,10 @@ import { supabase } from '../utils/supabase';
 interface FriendsCircleProps {
     isDarkMode: boolean;
     onStartVideoCall: (name: string, avatar?: string, friendId?: string) => void;
-    onStartChat?: (friend: any) => void;
     userRole?: 'student' | 'mentor';
 }
 
-export function FriendsCircle({ isDarkMode, onStartVideoCall, onStartChat, userRole }: FriendsCircleProps) {
+export function FriendsCircle({ isDarkMode, onStartVideoCall, userRole }: FriendsCircleProps) {
     const [selectedChat, setSelectedChat] = useState<any | null>(null);
 
     const openChat = (friend: any) => {
@@ -58,7 +57,7 @@ export function FriendsCircle({ isDarkMode, onStartVideoCall, onStartChat, userR
     const openProfileCard = async (friend: any) => {
         if (friend.isGroup) return;
         setProfileCardLoading(true);
-        setProfileCard({ id: friend.id, name: friend.name, avatarUrl: friend.avatarUrl, username: friend.username, role: friend.role, studyStreak: 0 });
+        setProfileCard({ id: friend.id, name: friend.name, avatarUrl: friend.avatarUrl && !friend.avatarUrl.includes('ui-avatars.com') ? friend.avatarUrl : null, username: friend.username, role: friend.role, studyStreak: 0 });
         try {
             const { data: profile } = await supabase.from('user_profiles').select('*').eq('user_id', friend.id).single();
             const { data: sessions } = await supabase.from('study_sessions').select('duration_minutes, start_time, created_at, focus_rating, subject_id').eq('user_id', friend.id).order('start_time', { ascending: false });
@@ -66,16 +65,30 @@ export function FriendsCircle({ isDarkMode, onStartVideoCall, onStartChat, userR
             const totalSessions = sessions?.length || 0;
             const focusRatings = sessions?.filter((s: any) => s.focus_rating > 0) || [];
             const avgFocus = focusRatings.length > 0 ? Math.round((focusRatings.reduce((a: number, s: any) => a + s.focus_rating, 0) / focusRatings.length) * 10) / 10 : 0;
-            // Always compute streak from sessions
+            // Compute streak using the same algorithm as calculateStreak utility
             let streak = 0;
             if (sessions && sessions.length > 0) {
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
                 const sessionDates = new Set<number>();
-                sessions.forEach((s: any) => { const d = new Date(s.start_time || s.created_at); d.setHours(0,0,0,0); sessionDates.add(d.getTime()); });
-                let st = 0; const ch = new Date(); ch.setHours(0,0,0,0);
-                if (sessionDates.has(ch.getTime())) { st = 1; ch.setDate(ch.getDate()-1); } else { ch.setDate(ch.getDate()-1); if (sessionDates.has(ch.getTime())) { st = 1; ch.setDate(ch.getDate()-1); } }
-                while (st > 0 && sessionDates.has(ch.getTime())) { st++; ch.setDate(ch.getDate()-1); }
-                streak = st;
+                sessions.forEach((s: any) => {
+                    const d = new Date(s.start_time || s.created_at);
+                    d.setHours(0, 0, 0, 0);
+                    sessionDates.add(d.getTime());
+                });
+
+                let currentDate = new Date(today);
+                if (!sessionDates.has(currentDate.getTime())) {
+                    currentDate.setDate(currentDate.getDate() - 1);
+                }
+                while (sessionDates.has(currentDate.getTime())) {
+                    streak++;
+                    currentDate.setDate(currentDate.getDate() - 1);
+                }
             }
+            // Prefer real DB avatar_url; skip generated ui-avatars.com ones
+            const dbAvatar = profile?.avatar_url && !profile.avatar_url.includes('ui-avatars.com') ? profile.avatar_url : null;
+            const contactAvatar = friend.avatarUrl && !friend.avatarUrl.includes('ui-avatars.com') ? friend.avatarUrl : null;
             setProfileCard((prev: any) => prev ? ({
                 ...prev,
                 bio: profile?.bio || '',
@@ -88,7 +101,8 @@ export function FriendsCircle({ isDarkMode, onStartVideoCall, onStartChat, userR
                 studyStreak: streak,
                 avgFocus,
                 location: profile?.location || profile?.city || '',
-                avatarUrl: profile?.avatar_url || friend.avatarUrl,
+                username: profile?.username || friend.username || '',
+                avatarUrl: dbAvatar || contactAvatar || null,
             }) : null);
         } catch (err) { console.error('Error loading profile card:', err); }
         finally { setProfileCardLoading(false); }
@@ -120,9 +134,9 @@ export function FriendsCircle({ isDarkMode, onStartVideoCall, onStartChat, userR
                         osc.start(ctx.currentTime + offset); osc.stop(ctx.currentTime + offset + 0.5);
                     };
                     playPulse(0); playPulse(0.7); playPulse(1.4);
-                } catch (_) {}
+                } catch (_) { }
             });
-        } catch (_) {}
+        } catch (_) { }
     }, []);
 
     // Create Group State
@@ -224,12 +238,25 @@ export function FriendsCircle({ isDarkMode, onStartVideoCall, onStartChat, userR
                 // Always compute streak from study_sessions (same algorithm as Dashboard's calculateStreak, using getTime for local timezone)
                 const { data: sess } = await supabase.from('study_sessions').select('start_time, created_at').eq('user_id', user!.id).order('start_time', { ascending: false }).limit(90);
                 if (sess && sess.length > 0) {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
                     const sessionDates = new Set<number>();
-                    sess.forEach((s: any) => { const d = new Date(s.start_time || s.created_at); d.setHours(0,0,0,0); sessionDates.add(d.getTime()); });
-                    let st = 0; const ch = new Date(); ch.setHours(0,0,0,0);
-                    if (sessionDates.has(ch.getTime())) { st = 1; ch.setDate(ch.getDate()-1); } else { ch.setDate(ch.getDate()-1); if (sessionDates.has(ch.getTime())) { st = 1; ch.setDate(ch.getDate()-1); } }
-                    while (st > 0 && sessionDates.has(ch.getTime())) { st++; ch.setDate(ch.getDate()-1); }
-                    setMyStreak(st);
+                    sess.forEach((s: any) => {
+                        const d = new Date(s.start_time || s.created_at);
+                        d.setHours(0, 0, 0, 0);
+                        sessionDates.add(d.getTime());
+                    });
+
+                    let streak = 0;
+                    let currentDate = new Date(today);
+                    if (!sessionDates.has(currentDate.getTime())) {
+                        currentDate.setDate(currentDate.getDate() - 1);
+                    }
+                    while (sessionDates.has(currentDate.getTime())) {
+                        streak++;
+                        currentDate.setDate(currentDate.getDate() - 1);
+                    }
+                    setMyStreak(streak);
                 } else {
                     setMyStreak(0);
                 }
@@ -339,17 +366,17 @@ export function FriendsCircle({ isDarkMode, onStartVideoCall, onStartChat, userR
                     <h2 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Friends Circle</h2>
                     <p className={`${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>Study together and stay motivated</p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-3">
                     <button
                         onClick={() => setShowCreateGroup(true)}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold transition-all ${isDarkMode ? 'bg-slate-800 text-white hover:bg-slate-700' : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200'}`}
+                        className={`flex items-center justify-center gap-2 px-4 py-2 rounded-xl font-bold transition-all ${isDarkMode ? 'bg-slate-800 text-white hover:bg-slate-700' : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200'}`}
                     >
                         <Plus size={20} />
                         New Group
                     </button>
                     <button
                         onClick={() => setShowAddFriend(true)}
-                        className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-xl font-bold shadow-md hover:shadow-lg transition-all"
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-xl font-bold shadow-md hover:shadow-lg transition-all"
                     >
                         <UserPlus size={20} />
                         Add Friend
@@ -380,21 +407,21 @@ export function FriendsCircle({ isDarkMode, onStartVideoCall, onStartChat, userR
                     {activeTab === 'groups' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-amber-500 rounded-full" />}
                 </button>
                 {userRole !== 'mentor' && (
-                <button
-                    onClick={() => setActiveTab('mentors')}
-                    className={`pb-4 px-2 font-bold transition-all relative ${activeTab === 'mentors' ? 'text-amber-500' : 'text-slate-500 hover:text-slate-400'}`}
-                >
-                    <span className="flex items-center gap-1.5">
-                        <GraduationCap size={16} />
-                        Mentors
-                        {mentorSessions.length > 0 && (
-                            <span className="px-1.5 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded-full">
-                                {mentorSessions.length}
-                            </span>
-                        )}
-                    </span>
-                    {activeTab === 'mentors' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-amber-500 rounded-full" />}
-                </button>
+                    <button
+                        onClick={() => setActiveTab('mentors')}
+                        className={`pb-4 px-2 font-bold transition-all relative ${activeTab === 'mentors' ? 'text-amber-500' : 'text-slate-500 hover:text-slate-400'}`}
+                    >
+                        <span className="flex items-center gap-1.5">
+                            <GraduationCap size={16} />
+                            Mentors
+                            {mentorSessions.length > 0 && (
+                                <span className="px-1.5 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded-full">
+                                    {mentorSessions.length}
+                                </span>
+                            )}
+                        </span>
+                        {activeTab === 'mentors' && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-amber-500 rounded-full" />}
+                    </button>
                 )}
             </div>
 
@@ -413,24 +440,22 @@ export function FriendsCircle({ isDarkMode, onStartVideoCall, onStartChat, userR
                                         <div
                                             key={friend.id}
                                             onClick={() => openChat(friend)}
-                                            className={`flex items-center justify-between p-4 rounded-xl transition-all cursor-pointer ${
-                                                unreadCounts[friend.id] > 0
-                                                    ? 'bg-gradient-to-r from-purple-500/15 via-blue-500/10 to-purple-500/5 border border-purple-500/30 shadow-sm shadow-purple-500/10'
-                                                    : isDarkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-50'
-                                            }`}
+                                            className={`flex items-center justify-between p-4 rounded-xl transition-all cursor-pointer ${unreadCounts[friend.id] > 0
+                                                ? 'bg-gradient-to-r from-purple-500/15 via-blue-500/10 to-purple-500/5 border border-purple-500/30 shadow-sm shadow-purple-500/10'
+                                                : isDarkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-50'
+                                                }`}
                                         >
                                             <div className="flex items-center gap-4">
                                                 <div className="relative cursor-pointer" onClick={(e) => { e.stopPropagation(); openProfileCard(friend); }}>
                                                     <img
                                                         src={friend.avatarUrl}
                                                         alt={friend.name}
-                                                        className={`w-12 h-12 rounded-full object-cover border-2 ${
-                                                            activeCalls.includes(friend.id)
-                                                                ? 'border-green-500 ring-2 ring-green-400/50 ring-offset-2 ring-offset-transparent animate-pulse'
-                                                                : unreadCounts[friend.id] > 0
-                                                                    ? 'border-purple-500/60 ring-2 ring-purple-400/30'
-                                                                    : 'border-amber-500/20'
-                                                        }`}
+                                                        className={`w-12 h-12 rounded-full object-cover border-2 ${activeCalls.includes(friend.id)
+                                                            ? 'border-green-500 ring-2 ring-green-400/50 ring-offset-2 ring-offset-transparent animate-pulse'
+                                                            : unreadCounts[friend.id] > 0
+                                                                ? 'border-purple-500/60 ring-2 ring-purple-400/30'
+                                                                : 'border-amber-500/20'
+                                                            }`}
                                                     />
                                                     <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 ${isDarkMode ? 'border-slate-800' : 'border-white'
                                                         } ${friend.status === 'studying' ? 'bg-blue-500' :
@@ -470,13 +495,13 @@ export function FriendsCircle({ isDarkMode, onStartVideoCall, onStartChat, userR
                                             <div className="flex items-center gap-4">
                                                 {/* Only show streaks for student friends, not mentors */}
                                                 {friend.role !== 'mentor' && (
-                                                <div className="text-right">
-                                                    <div className={`flex items-center gap-1 font-bold ${friend.studyStreak > 0 ? 'text-orange-500' : 'text-slate-400'}`}>
-                                                        <Flame size={14} className={friend.studyStreak > 0 ? 'text-orange-500' : 'text-slate-400'} />
-                                                        <span>{friend.studyStreak}</span>
+                                                    <div className="hidden sm:block text-right">
+                                                        <div className={`flex items-center gap-1 font-bold ${friend.studyStreak > 0 ? 'text-orange-500' : 'text-slate-400'}`}>
+                                                            <Flame size={14} className={friend.studyStreak > 0 ? 'text-orange-500' : 'text-slate-400'} />
+                                                            <span>{friend.studyStreak}</span>
+                                                        </div>
+                                                        <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Streak</p>
                                                     </div>
-                                                    <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Streak</p>
-                                                </div>
                                                 )}
                                                 <div className="flex gap-2">
                                                     <button
@@ -511,29 +536,26 @@ export function FriendsCircle({ isDarkMode, onStartVideoCall, onStartChat, userR
                                         <div
                                             key={group.id}
                                             onClick={() => openChat({ ...group, isGroup: true })}
-                                            className={`flex items-center justify-between p-4 rounded-xl transition-all cursor-pointer ${
-                                                unreadCounts[group.id] > 0
-                                                    ? 'bg-gradient-to-r from-purple-500/15 via-blue-500/10 to-purple-500/5 border border-purple-500/30 shadow-sm shadow-purple-500/10'
-                                                    : isDarkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-50'
-                                            }`}
+                                            className={`flex items-center justify-between p-4 rounded-xl transition-all cursor-pointer ${unreadCounts[group.id] > 0
+                                                ? 'bg-gradient-to-r from-purple-500/15 via-blue-500/10 to-purple-500/5 border border-purple-500/30 shadow-sm shadow-purple-500/10'
+                                                : isDarkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-50'
+                                                }`}
                                         >
                                             <div className="flex items-center gap-4">
                                                 {group.avatarUrl ? (
                                                     <img
                                                         src={group.avatarUrl}
                                                         alt={group.name}
-                                                        className={`w-12 h-12 rounded-xl object-cover border-2 ${
-                                                            unreadCounts[group.id] > 0
-                                                                ? 'border-purple-500/60 ring-2 ring-purple-400/30'
-                                                                : 'border-amber-500/20'
-                                                        }`}
-                                                    />
-                                                ) : (
-                                                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold text-white bg-gradient-to-br from-amber-500 to-orange-500 border-2 ${
-                                                        unreadCounts[group.id] > 0
+                                                        className={`w-12 h-12 rounded-xl object-cover border-2 ${unreadCounts[group.id] > 0
                                                             ? 'border-purple-500/60 ring-2 ring-purple-400/30'
                                                             : 'border-amber-500/20'
-                                                    }`}>
+                                                            }`}
+                                                    />
+                                                ) : (
+                                                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold text-white bg-gradient-to-br from-amber-500 to-orange-500 border-2 ${unreadCounts[group.id] > 0
+                                                        ? 'border-purple-500/60 ring-2 ring-purple-400/30'
+                                                        : 'border-amber-500/20'
+                                                        }`}>
                                                         {group.name.charAt(0).toUpperCase()}
                                                     </div>
                                                 )}
@@ -611,11 +633,10 @@ export function FriendsCircle({ isDarkMode, onStartVideoCall, onStartChat, userR
                                                         <h4 className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                                                             {session.mentorProfile?.fullName || 'Mentor'}
                                                         </h4>
-                                                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                                                            session.status === 'accepted'
-                                                                ? 'bg-green-500/10 text-green-500 border border-green-500/20'
-                                                                : 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
-                                                        }`}>
+                                                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${session.status === 'accepted'
+                                                            ? 'bg-green-500/10 text-green-500 border border-green-500/20'
+                                                            : 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
+                                                            }`}>
                                                             {session.status === 'accepted' ? 'Active' : 'Pending'}
                                                         </span>
                                                     </div>
@@ -677,12 +698,12 @@ export function FriendsCircle({ isDarkMode, onStartVideoCall, onStartChat, userR
 
                 {/* Sidebar Stats */}
                 {userRole !== 'mentor' && (
-                <div className="space-y-6">
-                    <div className={`rounded-2xl p-6 shadow-md border ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-                        <h3 className={`text-lg font-bold mb-4 flex items-center gap-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                            <Trophy size={20} className="text-amber-500" />
-                            Leaderboard
-                        </h3>
+                    <div className="space-y-6">
+                        <div className={`rounded-2xl p-6 shadow-md border ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                            <h3 className={`text-lg font-bold mb-4 flex items-center gap-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                                <Trophy size={20} className="text-amber-500" />
+                                Leaderboard
+                            </h3>
                             <div className="space-y-3">
                                 {(() => {
                                     // Build leaderboard: friends + current user
@@ -690,7 +711,7 @@ export function FriendsCircle({ isDarkMode, onStartVideoCall, onStartChat, userR
                                         ...friends.filter(f => f.role !== 'mentor').map(f => ({ id: f.id, name: f.name, avatarUrl: f.avatarUrl, streak: f.studyStreak, isMe: false })),
                                         ...(user && myProfile ? [{ id: user.id, name: myProfile.full_name || 'You', avatarUrl: myProfile.avatar_url || `https://ui-avatars.com/api/?name=You&background=random`, streak: myStreak, isMe: true }] : [])
                                     ].sort((a, b) => b.streak - a.streak);
-                                    
+
                                     return entries.length > 0 ? entries.map((entry, idx) => (
                                         <div key={entry.id} className={`flex items-center gap-3 p-2 rounded-xl transition-all ${entry.isMe ? (isDarkMode ? 'bg-amber-500/10 border border-amber-500/20' : 'bg-amber-50 border border-amber-100') : ''}`}>
                                             <span className={`w-6 text-sm font-bold ${idx === 0 ? 'text-amber-500' : idx === 1 ? 'text-slate-400' : idx === 2 ? 'text-orange-400' : 'text-slate-500'}`}>
@@ -715,7 +736,7 @@ export function FriendsCircle({ isDarkMode, onStartVideoCall, onStartChat, userR
 
                     </div>
                 )}
-                </div>
+            </div>
 
             {/* Add Friend Modal */}
             {showAddFriend && (
@@ -883,9 +904,14 @@ export function FriendsCircle({ isDarkMode, onStartVideoCall, onStartChat, userR
                                 <X size={16} />
                             </button>
                             <div className="absolute -bottom-[4.5rem] left-1/2 -translate-x-1/2">
-                                {profileCard.avatarUrl ? (
-                                    <img src={profileCard.avatarUrl} alt="" className="w-36 h-36 rounded-full object-cover border-4 shadow-lg cursor-pointer hover:ring-4 hover:ring-white/30 transition-all" style={{ borderColor: isDarkMode ? '#1e293b' : '#ffffff' }}
+                                {profileCard.avatarUrl && !profileCard.avatarUrl.includes('ui-avatars.com') ? (
+                                    <img
+                                        src={profileCard.avatarUrl}
+                                        alt=""
+                                        className="w-36 h-36 rounded-full object-cover border-4 shadow-lg cursor-pointer hover:ring-4 hover:ring-white/30 transition-all"
+                                        style={{ borderColor: isDarkMode ? '#1e293b' : '#ffffff' }}
                                         onClick={(e) => { e.stopPropagation(); setImagePreview(profileCard.avatarUrl); }}
+                                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                                     />
                                 ) : (
                                     <div className="w-36 h-36 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-4xl font-bold text-white border-4 shadow-lg" style={{ borderColor: isDarkMode ? '#1e293b' : '#ffffff' }}>

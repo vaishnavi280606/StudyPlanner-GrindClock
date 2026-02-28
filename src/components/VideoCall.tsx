@@ -572,7 +572,7 @@ export function VideoCall({
                                 }
 
                                 // Always notify other side that call ended
-                                await createNotification(participantId, currentUserId, 'call_ended', {
+                                await createNotification(participantId, currentUserId, 'call_ended', `Call ended. Duration: ${Math.floor(duration / 60)}m ${duration % 60}s`, {
                                     duration,
                                     senderName: 'User'
                                 });
@@ -598,13 +598,12 @@ export function VideoCall({
                                 {' • Secured'}
                                 <span className="flex gap-0.5 ml-1">
                                     {['excellent', 'good', 'poor'].map((q, i) => (
-                                        <div key={i} className={`w-1 rounded-full ${
-                                            (connectionQuality === 'excellent' && i <= 2) ||
-                                            (connectionQuality === 'good' && i <= 1) ||
-                                            (connectionQuality === 'poor' && i === 0)
+                                        <div key={i} className={`w-1 rounded-full ${(connectionQuality === 'excellent' && i <= 2) ||
+                                                (connectionQuality === 'good' && i <= 1) ||
+                                                (connectionQuality === 'poor' && i === 0)
                                                 ? 'bg-green-500'
                                                 : 'bg-white/20'
-                                        }`} style={{ height: `${8 + i * 4}px` }} />
+                                            }`} style={{ height: `${8 + i * 4}px` }} />
                                     ))}
                                 </span>
                             </span>

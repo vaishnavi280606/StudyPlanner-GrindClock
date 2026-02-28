@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { BookOpen, LayoutDashboard, Clock, Target, History, Zap, Play, Pause, BarChart3, Brain, Lightbulb, X, Users, GraduationCap, Settings as SettingsIcon, Volume2, VolumeX, Phone, PhoneOff, CalendarCheck, MessageCircle, Tag } from 'lucide-react';
+import { BookOpen, LayoutDashboard, Clock, Target, History, Zap, BarChart3, Brain, X, Users, GraduationCap, Settings as SettingsIcon, Phone, PhoneOff, CalendarCheck, Tag } from 'lucide-react';
 import { Subject, StudySession, StudyGoal } from './types';
 import { storage } from './utils/storage';
 import { Dashboard } from './components/Dashboard';
@@ -12,7 +12,6 @@ import { AIRecommendations } from './components/AIRecommendations';
 import { StudyTechniques } from './components/StudyTechniques';
 import { Reminder } from './components/Reminder';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { UserProfile } from './components/UserProfile';
 import { useAuth } from './contexts/AuthContext';
 import { GoalReminderPopup } from './components/GoalReminderPopup';
 import { AIChatbot } from './components/AIChatbot';
@@ -24,7 +23,6 @@ import { createNotification, subscribeToNotifications, fetchUnreadCounts } from 
 import { supabase } from './utils/supabase';
 import { Header } from './components/Header';
 import { Settings } from './components/Settings';
-import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastNotification } from './components/ToastNotification';
 import MentorDashboard from './components/MentorDashboard';
 import { MentorSessionsPage } from './components/MentorSessionsPage';
@@ -58,13 +56,6 @@ function AppContent() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [goalsInitialTab, setGoalsInitialTab] = useState<'goals' | 'exams' | 'tracker'>('goals');
 
-  // Draggable timer position state
-  const [timerPosition, setTimerPosition] = useState(() => {
-    const saved = localStorage.getItem('grind_clock_timer_position');
-    return saved ? JSON.parse(saved) : { x: window.innerWidth - 300, y: 80 }; // Default top-right position
-  });
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
   // Persistent timer state
   const [timerState, setTimerState] = useState<TimerState>({
@@ -101,13 +92,13 @@ function AppContent() {
     return saved ? JSON.parse(saved) : true;
   });
 
-  const ringtoneRef = useRef<HTMLAudioElement | null>(null);
+
   const [toasts, setToasts] = useState<Array<{ id: string; message: string; senderName?: string; senderAvatar?: string; type: 'message' | 'info' | 'success'; senderId?: string }>>([]);
   const removeToast = useCallback((id: string) => setToasts(prev => prev.filter(t => t.id !== id)), []);
 
   const [userRole, setUserRole] = useState<'student' | 'mentor'>('student');
 
-  const { user } = useAuth();
+  const { user, isGuest } = useAuth();
 
   // Notification sound — plays a real audio file, falls back to Web Audio API
   const playNotificationSound = useCallback(() => {
@@ -128,14 +119,33 @@ function AppContent() {
           g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
           o1.start(); o1.stop(ctx.currentTime + 0.12);
           o2.start(ctx.currentTime + 0.08); o2.stop(ctx.currentTime + 0.3);
-        } catch (_) {}
+        } catch (err) {
+          console.error('AudioContext fallback failed', err);
+        }
       });
-    } catch (_) {}
+    } catch (err) {
+      console.error('Audio play failed', err);
+    }
   }, [soundEnabled, receiveMsgSoundEnabled, soundVolume]);
 
   // Ringtone — plays a real audio file on loop, falls back to Web Audio API
   const ringtoneCtxRef = useRef<{ ctx: AudioContext; interval: ReturnType<typeof setInterval> } | null>(null);
   const ringtoneAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  const stopRingtone = useCallback(() => {
+    // Stop audio element ringtone
+    if (ringtoneAudioRef.current) {
+      ringtoneAudioRef.current.pause();
+      ringtoneAudioRef.current.src = '';
+      ringtoneAudioRef.current = null;
+    }
+    // Stop Web Audio API fallback ringtone
+    if (ringtoneCtxRef.current) {
+      clearInterval(ringtoneCtxRef.current.interval);
+      ringtoneCtxRef.current.ctx.close().catch((err) => { console.error('Error closing ringtone context', err); });
+      ringtoneCtxRef.current = null;
+    }
+  }, []);
 
   const playRingtone = useCallback(() => {
     if (!soundEnabled || !incomingCallSoundEnabled) return;
@@ -163,25 +173,22 @@ function AppContent() {
           playPulse();
           const interval = setInterval(playPulse, 1200);
           ringtoneCtxRef.current = { ctx, interval };
-        } catch (_) {}
+        } catch (err) {
+          console.error('AudioContext ringtone fallback failed', err);
+        }
       });
-    } catch (_) {}
-  }, [soundEnabled, incomingCallSoundEnabled, soundVolume]);
+    } catch (err) {
+      console.error('Ringtone play failed', err);
+    }
+  }, [soundEnabled, incomingCallSoundEnabled, soundVolume, stopRingtone]);
 
-  const stopRingtone = useCallback(() => {
-    // Stop audio element ringtone
-    if (ringtoneAudioRef.current) {
-      ringtoneAudioRef.current.pause();
-      ringtoneAudioRef.current.src = '';
-      ringtoneAudioRef.current = null;
-    }
-    // Stop Web Audio API fallback ringtone
-    if (ringtoneCtxRef.current) {
-      clearInterval(ringtoneCtxRef.current.interval);
-      ringtoneCtxRef.current.ctx.close().catch(() => {});
-      ringtoneCtxRef.current = null;
-    }
-  }, []);
+
+  const loadGlobalUnreadCount = useCallback(async () => {
+    if (!user) return;
+    const counts = await fetchUnreadCounts(user.id);
+    const total = Object.values(counts).reduce((acc: number, curr: any) => acc + curr, 0);
+    setTotalUnreadMessages(total);
+  }, [user]);
 
 
 
@@ -245,7 +252,7 @@ function AppContent() {
         sub.unsubscribe();
       };
     }
-  }, [user, playNotificationSound, playRingtone]);
+  }, [user, playNotificationSound, playRingtone, loadGlobalUnreadCount]);
 
   // Listen for notifications-read events to refresh global unread count
   useEffect(() => {
@@ -259,14 +266,8 @@ function AppContent() {
     return () => window.removeEventListener('notifications-read', handler);
   }, [user]);
 
-  const loadGlobalUnreadCount = async () => {
-    if (!user) return;
-    const counts = await fetchUnreadCounts(user.id);
-    const total = Object.values(counts).reduce((acc, curr) => acc + curr, 0);
-    setTotalUnreadMessages(total);
-  };
 
-  const loadUserProfile = async () => {
+  const loadUserProfile = useCallback(async () => {
     if (!user) return;
     try {
       const { data, error } = await supabase
@@ -280,15 +281,16 @@ function AppContent() {
     } catch (error) {
       console.error('Error loading role:', error);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     if (user) {
       loadUserProfile();
     }
-  }, [user]);
+  }, [user, loadUserProfile]);
 
-  const handleNotificationClick = (notif: any) => {
+  const handleNotificationClick = (notifOrType: any, data?: any) => {
+    const notif = typeof notifOrType === 'string' ? { type: notifOrType, ...data } : notifOrType;
     if (notif.type === 'message') {
       setCurrentView('friends');
     } else if (notif.type === 'friend_request') {
@@ -336,6 +338,11 @@ function AppContent() {
   useEffect(() => {
     const loadData = async () => {
       try {
+        // If user just logged in (transitioned from guest/null to a real user), migrate data
+        if (user && user.id !== 'guest' && !isGuest) {
+          await storage.migrateGuestData(user.id);
+        }
+
         const [loadedSubjects, loadedSessions, loadedGoals] = await Promise.all([
           storage.getSubjects(),
           storage.getSessions(),
@@ -633,8 +640,16 @@ function AppContent() {
 
   return (
     <div className={`min-h-screen flex transition-colors ${isDarkMode ? 'bg-gradient-to-br from-slate-900 to-slate-800' : 'bg-gradient-to-br from-slate-50 to-slate-100'}`}>
-      {/* Persistent Left Sidebar - Grind Menu */}
-      <div className={`w-80 h-screen fixed left-0 top-0 shadow-lg z-30 transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-80'
+      {/* Mobile Sidebar Backdrop */}
+      {isSidebarOpen && (
+        <div
+          className="lg:hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-40 transition-opacity"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      {/* Persistent/Drawer Sidebar - Grind Menu */}
+      <div className={`w-80 h-screen fixed left-0 top-0 shadow-lg z-50 transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-80'
         } ${isDarkMode ? 'bg-slate-800 border-r border-slate-700' : 'bg-white border-r border-slate-200'}`}>
         <div className="flex items-center justify-between px-6 py-6 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-3">
@@ -678,7 +693,7 @@ function AppContent() {
                   <span className={`min-w-[20px] h-5 flex items-center justify-center px-1 rounded-full text-[10px] font-bold leading-none ${currentView === item.id
                     ? 'bg-white/20 text-white'
                     : 'bg-amber-500 text-white'
-                  }`}>
+                    }`}>
                     {totalUnreadMessages > 99 ? '99+' : totalUnreadMessages}
                   </span>
                 )}
@@ -707,8 +722,7 @@ function AppContent() {
       </div>
 
       {/* Main Content Area */}
-      {/* Main Content Area */}
-      <div className={`flex-1 transition-all duration-300 relative h-screen flex flex-col ${isSidebarOpen ? 'ml-80' : 'ml-0'}`}>
+      <div className={`flex-1 transition-all duration-300 relative h-screen flex flex-col ${isSidebarOpen ? 'lg:ml-80 ml-0' : 'ml-0'}`}>
         <Header
           isDarkMode={isDarkMode}
           setIsDarkMode={setIsDarkMode}
@@ -723,7 +737,6 @@ function AppContent() {
           onTimerPause={handleTimerPause}
           onTimerResume={handleTimerResume}
           subjects={subjects}
-          onSettingsClick={() => setCurrentView('settings')}
           userRole={userRole}
         />
 
@@ -812,7 +825,7 @@ function AppContent() {
               />
             )}
             {currentView === 'mentors' && (
-              <MentorConnect isDarkMode={isDarkMode} onStartVideoCall={handleStartVideoCall} onStartChat={() => {}} />
+              <MentorConnect isDarkMode={isDarkMode} onStartVideoCall={handleStartVideoCall} onStartChat={() => { }} />
             )}
             {currentView === 'friends' && (
               <FriendsCircle
@@ -922,7 +935,6 @@ function AppContent() {
           <IncomingCallModal
             incomingCall={incomingCall}
             isDarkMode={isDarkMode}
-            user={user}
             onAccept={() => {
               stopRingtone();
               setActiveVideoCall({
@@ -943,7 +955,9 @@ function AppContent() {
                     'call_ended',
                     `📞 Missed call from ${user.user_metadata?.full_name || 'User'}`
                   );
-                } catch (_) {}
+                } catch (err) {
+                  console.error('Failed to create notification during call rejection', err);
+                }
               }
               setIncomingCall(null);
             }}
@@ -978,9 +992,11 @@ function AppContent() {
 }
 
 /* ─── Incoming Call Modal with 30s auto-timeout ─── */
-function IncomingCallModal({ incomingCall, isDarkMode, user, onAccept, onReject }: {
-  incomingCall: any; isDarkMode: boolean; user: any;
-  onAccept: () => void; onReject: () => void;
+function IncomingCallModal({ incomingCall, isDarkMode, onAccept, onReject }: {
+  incomingCall: { caller_id?: string; sender_id?: string; senderName?: string; senderAvatar?: string; content?: string;[key: string]: unknown };
+  isDarkMode: boolean;
+  onAccept: () => void;
+  onReject: () => void;
 }) {
   const [countdown, setCountdown] = useState(30);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1016,7 +1032,7 @@ function IncomingCallModal({ incomingCall, isDarkMode, user, onAccept, onReject 
           </div>
 
           <h2 className={`text-2xl font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-            {incomingCall.senderName}
+            {incomingCall.senderName || 'Someone'}
           </h2>
           <p className="text-amber-500 font-medium animate-pulse mb-2">
             Incoming Video Call...

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Flame, Trophy, Target, Calendar, Clock, Brain } from 'lucide-react';
+import { Flame, Trophy, Target, Calendar, Clock, Brain, LucideIcon } from 'lucide-react';
 import { StudySession } from '../types';
 
 interface StudyStreaksProps {
@@ -11,7 +11,7 @@ interface Achievement {
   id: string;
   title: string;
   description: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
+  icon: LucideIcon;
   condition: (sessions: StudySession[]) => boolean;
   progress?: (sessions: StudySession[]) => { current: number; target: number };
   unlocked: boolean;
@@ -76,32 +76,36 @@ const achievements: Achievement[] = [
 function calculateStreak(sessions: StudySession[]): number {
   if (sessions.length === 0) return 0;
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  
   const sessionDates = new Set(
     sessions.map(s => {
-      const date = new Date(s.startTime);
+      const date = new Date(s.startTime || (s as any).created_at);
       date.setHours(0, 0, 0, 0);
       return date.getTime();
     })
   );
 
   let streak = 0;
-  let currentDate = new Date(today);
+  const checkDate = new Date();
+  checkDate.setHours(0, 0, 0, 0);
 
-  // Check if there's a session today or yesterday (to account for ongoing streaks)
-  if (!sessionDates.has(currentDate.getTime())) {
-    currentDate.setDate(currentDate.getDate() - 1);
-    if (!sessionDates.has(currentDate.getTime())) {
+  // If there's a session today, streak starts at 1 and we check yesterday
+  if (sessionDates.has(checkDate.getTime())) {
+    streak = 1;
+    checkDate.setDate(checkDate.getDate() - 1);
+  } else {
+    // If no session today, check if there was one yesterday to keep streak alive
+    checkDate.setDate(checkDate.getDate() - 1);
+    if (!sessionDates.has(checkDate.getTime())) {
       return 0;
     }
+    streak = 1;
+    checkDate.setDate(checkDate.getDate() - 1);
   }
 
-  // Count consecutive days backwards
-  while (sessionDates.has(currentDate.getTime())) {
+  // Count backwards from yesterday (or day before yesterday)
+  while (sessionDates.has(checkDate.getTime())) {
     streak++;
-    currentDate.setDate(currentDate.getDate() - 1);
+    checkDate.setDate(checkDate.getDate() - 1);
   }
 
   return streak;
@@ -113,27 +117,27 @@ export function StudyStreaks({ sessions, isDarkMode }: StudyStreaksProps) {
 
   const currentStreak = calculateStreak(sessions);
   const longestStreak = calculateLongestStreak(sessions);
-  
+
   useEffect(() => {
     // Load previously unlocked achievements
     const stored = localStorage.getItem('grind_clock_achievements');
     const storedAchievements = stored ? JSON.parse(stored) : [];
-    
+
     // Check for newly unlocked achievements
     const updatedAchievements = achievements.map(achievement => {
       const wasUnlocked = storedAchievements.find((a: any) => a.id === achievement.id);
       const isNowUnlocked = achievement.condition(sessions);
-      
+
       if (isNowUnlocked && !wasUnlocked) {
         return { ...achievement, unlocked: true, unlockedAt: new Date() };
       } else if (wasUnlocked) {
         return { ...achievement, unlocked: true, unlockedAt: new Date(wasUnlocked.unlockedAt) };
       }
-      
+
       return achievement;
     });
 
-    const newUnlocked = updatedAchievements.filter(a => 
+    const newUnlocked = updatedAchievements.filter(a =>
       a.unlocked && !storedAchievements.find((s: any) => s.id === a.id)
     );
 
@@ -143,7 +147,7 @@ export function StudyStreaks({ sessions, isDarkMode }: StudyStreaksProps) {
     }
 
     setUnlockedAchievements(updatedAchievements.filter(a => a.unlocked));
-    
+
     // Save updated achievements
     localStorage.setItem('grind_clock_achievements', JSON.stringify(
       updatedAchievements.filter(a => a.unlocked).map(a => ({ id: a.id, unlockedAt: a.unlockedAt }))
@@ -153,11 +157,10 @@ export function StudyStreaks({ sessions, isDarkMode }: StudyStreaksProps) {
   return (
     <div className="space-y-6">
       {/* Streak Display */}
-      <div className={`rounded-xl p-6 shadow-md border transition-colors ${
-        isDarkMode 
-          ? 'bg-gradient-to-br from-orange-900 to-red-900 border-orange-700' 
-          : 'bg-gradient-to-br from-orange-50 to-red-50 border-orange-200'
-      }`}>
+      <div className={`rounded-xl p-6 shadow-md border transition-colors ${isDarkMode
+        ? 'bg-gradient-to-br from-orange-900 to-red-900 border-orange-700'
+        : 'bg-gradient-to-br from-orange-50 to-red-50 border-orange-200'
+        }`}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <Flame className={`${isDarkMode ? 'text-orange-400' : 'text-orange-600'}`} size={32} />
@@ -175,15 +178,14 @@ export function StudyStreaks({ sessions, isDarkMode }: StudyStreaksProps) {
             <div className="text-xs">Study today to maintain your streak</div>
           </div>
         </div>
-        
+
         {/* Streak Visualization */}
         <div className="flex gap-1 overflow-x-auto pb-2">
           {Array.from({ length: Math.min(currentStreak, 30) }, (_, i) => (
             <div
               key={i}
-              className={`w-3 h-8 rounded-sm ${
-                isDarkMode ? 'bg-orange-500' : 'bg-orange-400'
-              }`}
+              className={`w-3 h-8 rounded-sm ${isDarkMode ? 'bg-orange-500' : 'bg-orange-400'
+                }`}
               title={`Day ${currentStreak - i}`}
             />
           ))}
@@ -196,9 +198,8 @@ export function StudyStreaks({ sessions, isDarkMode }: StudyStreaksProps) {
       </div>
 
       {/* Achievements */}
-      <div className={`rounded-xl p-6 shadow-md border transition-colors ${
-        isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
-      }`}>
+      <div className={`rounded-xl p-6 shadow-md border transition-colors ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
+        }`}>
         <div className="flex items-center gap-3 mb-6">
           <Trophy className={`${isDarkMode ? 'text-yellow-400' : 'text-yellow-600'}`} size={24} />
           <h3 className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
@@ -211,19 +212,18 @@ export function StudyStreaks({ sessions, isDarkMode }: StudyStreaksProps) {
             const Icon = achievement.icon;
             const isUnlocked = unlockedAchievements.some(a => a.id === achievement.id);
             const progress = achievement.progress ? achievement.progress(sessions) : null;
-            
+
             return (
               <div
                 key={achievement.id}
-                className={`p-4 rounded-lg border transition-all ${
-                  isUnlocked
-                    ? isDarkMode
-                      ? 'bg-gradient-to-br from-yellow-900/30 to-amber-900/30 border-yellow-600'
-                      : 'bg-gradient-to-br from-yellow-50 to-amber-50 border-yellow-300'
-                    : isDarkMode
+                className={`p-4 rounded-lg border transition-all ${isUnlocked
+                  ? isDarkMode
+                    ? 'bg-gradient-to-br from-yellow-900/30 to-amber-900/30 border-yellow-600'
+                    : 'bg-gradient-to-br from-yellow-50 to-amber-50 border-yellow-300'
+                  : isDarkMode
                     ? 'bg-slate-700 border-slate-600 opacity-60'
                     : 'bg-slate-50 border-slate-200 opacity-60'
-                }`}
+                  }`}
               >
                 <div className="flex items-start gap-3">
                   <Icon
@@ -235,21 +235,19 @@ export function StudyStreaks({ sessions, isDarkMode }: StudyStreaksProps) {
                     }
                   />
                   <div className="flex-1">
-                    <h4 className={`font-semibold ${
-                      isUnlocked
-                        ? isDarkMode ? 'text-yellow-200' : 'text-yellow-800'
-                        : isDarkMode ? 'text-slate-400' : 'text-slate-600'
-                    }`}>
+                    <h4 className={`font-semibold ${isUnlocked
+                      ? isDarkMode ? 'text-yellow-200' : 'text-yellow-800'
+                      : isDarkMode ? 'text-slate-400' : 'text-slate-600'
+                      }`}>
                       {achievement.title}
                     </h4>
-                    <p className={`text-sm ${
-                      isUnlocked
-                        ? isDarkMode ? 'text-yellow-300' : 'text-yellow-700'
-                        : isDarkMode ? 'text-slate-500' : 'text-slate-500'
-                    }`}>
+                    <p className={`text-sm ${isUnlocked
+                      ? isDarkMode ? 'text-yellow-300' : 'text-yellow-700'
+                      : isDarkMode ? 'text-slate-500' : 'text-slate-500'
+                      }`}>
                       {achievement.description}
                     </p>
-                    
+
                     {progress && !isUnlocked && (
                       <div className="mt-2">
                         <div className="flex justify-between text-xs mb-1">
@@ -264,7 +262,7 @@ export function StudyStreaks({ sessions, isDarkMode }: StudyStreaksProps) {
                         </div>
                       </div>
                     )}
-                    
+
                     {isUnlocked && (
                       <div className={`text-xs mt-1 ${isDarkMode ? 'text-yellow-400' : 'text-yellow-600'}`}>
                         ✓ Unlocked
@@ -316,9 +314,9 @@ function calculateLongestStreak(sessions: StudySession[]): number {
   for (let i = 1; i < sortedDates.length; i++) {
     const prevDate = new Date(sortedDates[i - 1]);
     const currentDate = new Date(sortedDates[i]);
-    
+
     prevDate.setDate(prevDate.getDate() + 1);
-    
+
     if (prevDate.getTime() === currentDate.getTime()) {
       currentStreak++;
       maxStreak = Math.max(maxStreak, currentStreak);

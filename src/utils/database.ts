@@ -134,8 +134,9 @@ export const subjectService = {
 
     return true;
   }
-};// Databa
-se operations for study sessions
+};
+
+// Database operations for study sessions
 export const studySessionService = {
   async getSessions(userId: string, limit?: number): Promise<StudySession[]> {
     let query = supabase
@@ -188,12 +189,12 @@ export const studySessionService = {
 
   async updateSession(sessionId: string, updates: Partial<StudySession>): Promise<boolean> {
     const dbUpdates: any = { ...updates };
-    
+
     if (updates.startTime) {
       dbUpdates.start_time = updates.startTime.toISOString();
       delete dbUpdates.startTime;
     }
-    
+
     if (updates.endTime) {
       dbUpdates.end_time = updates.endTime.toISOString();
       delete dbUpdates.endTime;
@@ -265,17 +266,17 @@ export const studyGoalService = {
 
   async updateGoal(goalId: string, updates: Partial<StudyGoal>): Promise<boolean> {
     const dbUpdates: any = { ...updates };
-    
+
     if (updates.targetDate) {
       dbUpdates.target_date = updates.targetDate.toISOString();
       delete dbUpdates.targetDate;
     }
-    
+
     if (updates.completedAt) {
       dbUpdates.completed_at = updates.completedAt.toISOString();
       delete dbUpdates.completedAt;
     }
-    
+
     if (updates.examDate) {
       dbUpdates.exam_date = updates.examDate.toISOString();
       delete dbUpdates.examDate;

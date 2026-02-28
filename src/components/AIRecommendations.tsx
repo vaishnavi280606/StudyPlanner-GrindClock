@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Brain, Lightbulb, TrendingUp, Clock, Target, AlertCircle, CheckCircle, Zap } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { LucideIcon, Brain, Lightbulb, TrendingUp, Clock, Target, AlertCircle, CheckCircle, Zap } from 'lucide-react';
 import { StudySession, Subject } from '../types';
 
 interface AIRecommendationsProps {
@@ -17,24 +17,24 @@ interface Recommendation {
   actionable: string;
   reasoning: string;
   impact: string;
-  icon: any;
+  icon: LucideIcon;
   color: string;
 }
 
 export function AIRecommendations({ sessions, subjects, isDarkMode }: AIRecommendationsProps) {
   const [selectedType, setSelectedType] = useState<string>('all');
 
-  const generateRecommendations = (): Recommendation[] => {
-    const recommendations: Recommendation[] = [];
+  const recommendations = useMemo(() => {
+    const recommendationsList: Recommendation[] = [];
     const now = new Date();
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const recentSessions = sessions.filter(s => s.startTime >= weekAgo);
+    const recentSessions = sessions.filter(s => new Date(s.startTime) >= weekAgo);
 
     // Analyze study patterns
     const hourCounts = new Array(24).fill(0);
     const focusRatings: number[] = [];
     const sessionLengths: number[] = [];
-    
+
     recentSessions.forEach(session => {
       const hour = new Date(session.startTime).getHours();
       hourCounts[hour]++;
@@ -57,7 +57,7 @@ export function AIRecommendations({ sessions, subjects, isDarkMode }: AIRecommen
       const eveningStudy = eveningHours.reduce((sum, hour) => sum + hourCounts[hour], 0);
 
       if (morningStudy < afternoonStudy && morningStudy < eveningStudy) {
-        recommendations.push({
+        recommendationsList.push({
           id: 'morning-study',
           type: 'schedule',
           priority: 'high',
@@ -72,7 +72,7 @@ export function AIRecommendations({ sessions, subjects, isDarkMode }: AIRecommen
       }
 
       if (peakHour >= 0 && hourCounts[peakHour] >= 3) {
-        recommendations.push({
+        recommendationsList.push({
           id: 'peak-hour-optimization',
           type: 'schedule',
           priority: 'medium',
@@ -89,7 +89,7 @@ export function AIRecommendations({ sessions, subjects, isDarkMode }: AIRecommen
 
     // Focus Improvement Recommendations
     if (avgFocus > 0 && avgFocus < 3.5) {
-      recommendations.push({
+      recommendationsList.push({
         id: 'focus-improvement',
         type: 'focus',
         priority: 'high',
@@ -104,7 +104,7 @@ export function AIRecommendations({ sessions, subjects, isDarkMode }: AIRecommen
     }
 
     if (avgSessionLength > 90) {
-      recommendations.push({
+      recommendationsList.push({
         id: 'session-length',
         type: 'technique',
         priority: 'medium',
@@ -125,16 +125,16 @@ export function AIRecommendations({ sessions, subjects, isDarkMode }: AIRecommen
       return { subject, hours, target: subject.targetHoursPerWeek };
     });
 
-    const imbalancedSubjects = subjectHours.filter(s => 
+    const imbalancedSubjects = subjectHours.filter(s =>
       s.target > 0 && s.hours < s.target * 0.6
     );
 
     if (imbalancedSubjects.length > 0) {
-      const mostNeglected = imbalancedSubjects.sort((a, b) => 
+      const mostNeglected = imbalancedSubjects.sort((a, b) =>
         (a.hours / a.target) - (b.hours / b.target)
       )[0];
 
-      recommendations.push({
+      recommendationsList.push({
         id: 'subject-balance',
         type: 'balance',
         priority: 'high',
@@ -151,10 +151,10 @@ export function AIRecommendations({ sessions, subjects, isDarkMode }: AIRecommen
     // Performance-based Recommendations
     const subjectPerformance = subjects.map(subject => {
       const subjectSessions = recentSessions.filter(s => s.subjectId === subject.id);
-      const avgFocus = subjectSessions.filter(s => s.focusRating).length > 0
+      const avgFocusVal = subjectSessions.filter(s => s.focusRating).length > 0
         ? subjectSessions.reduce((sum, s) => sum + (s.focusRating || 0), 0) / subjectSessions.filter(s => s.focusRating).length
         : 0;
-      return { subject, avgFocus, sessionCount: subjectSessions.length };
+      return { subject, avgFocus: avgFocusVal, sessionCount: subjectSessions.length };
     });
 
     const weakSubject = subjectPerformance
@@ -162,7 +162,7 @@ export function AIRecommendations({ sessions, subjects, isDarkMode }: AIRecommen
       .sort((a, b) => a.avgFocus - b.avgFocus)[0];
 
     if (weakSubject && weakSubject.avgFocus < 3) {
-      recommendations.push({
+      recommendationsList.push({
         id: 'weak-subject-technique',
         type: 'technique',
         priority: 'medium',
@@ -177,12 +177,12 @@ export function AIRecommendations({ sessions, subjects, isDarkMode }: AIRecommen
     }
 
     // Consistency Recommendations
-    const studyDays = new Set(recentSessions.map(s => 
+    const studyDays = new Set(recentSessions.map(s =>
       new Date(s.startTime).toDateString()
     )).size;
 
     if (studyDays < 5) {
-      recommendations.push({
+      recommendationsList.push({
         id: 'consistency',
         type: 'schedule',
         priority: 'medium',
@@ -196,16 +196,16 @@ export function AIRecommendations({ sessions, subjects, isDarkMode }: AIRecommen
       });
     }
 
-    return recommendations.sort((a, b) => {
-      const priorityOrder = { high: 3, medium: 2, low: 1 };
+    return recommendationsList.sort((a, b) => {
+      const priorityOrder: Record<string, number> = { high: 3, medium: 2, low: 1 };
       return priorityOrder[b.priority] - priorityOrder[a.priority];
     });
-  };
-
-  const recommendations = generateRecommendations();
-  const filteredRecommendations = selectedType === 'all' 
-    ? recommendations 
-    : recommendations.filter(r => r.type === selectedType);
+  }, [sessions, subjects]);
+  const filteredRecommendations = useMemo(() => {
+    return selectedType === 'all'
+      ? recommendations
+      : recommendations.filter(r => r.type === selectedType);
+  }, [recommendations, selectedType]);
 
   const recommendationTypes = [
     { key: 'all', label: 'All Recommendations', count: recommendations.length },
@@ -269,13 +269,12 @@ export function AIRecommendations({ sessions, subjects, isDarkMode }: AIRecommen
           <button
             key={type.key}
             onClick={() => setSelectedType(type.key)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              selectedType === type.key
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${selectedType === type.key
                 ? 'bg-purple-500 text-white'
                 : isDarkMode
-                ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-            }`}
+                  ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
           >
             {type.label} ({type.count})
           </button>
@@ -289,9 +288,8 @@ export function AIRecommendations({ sessions, subjects, isDarkMode }: AIRecommen
           return (
             <div
               key={rec.id}
-              className={`p-6 rounded-lg border-l-4 ${getPriorityColor(rec.priority)} ${
-                isDarkMode ? 'bg-gray-800' : 'bg-white'
-              } border ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}
+              className={`p-6 rounded-lg border-l-4 ${getPriorityColor(rec.priority)} ${isDarkMode ? 'bg-gray-800' : 'bg-white'
+                } border ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}
             >
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center space-x-3">
@@ -302,10 +300,9 @@ export function AIRecommendations({ sessions, subjects, isDarkMode }: AIRecommen
                     </h3>
                     <div className="flex items-center space-x-2 mt-1">
                       {getPriorityIcon(rec.priority)}
-                      <span className={`text-sm font-medium capitalize ${
-                        rec.priority === 'high' ? 'text-red-500' :
-                        rec.priority === 'medium' ? 'text-yellow-500' : 'text-green-500'
-                      }`}>
+                      <span className={`text-sm font-medium capitalize ${rec.priority === 'high' ? 'text-red-500' :
+                          rec.priority === 'medium' ? 'text-yellow-500' : 'text-green-500'
+                        }`}>
                         {rec.priority} Priority
                       </span>
                     </div>

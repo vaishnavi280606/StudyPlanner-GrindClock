@@ -1,0 +1,9 @@
+﻿
+> vite-react-typescript-starter@0.0.0 typecheck
+> tsc --noEmit -p tsconfig.app.json
+
+src/utils/database.ts(138,1): error TS1434: Unexpected keyword or identifier.
+src/utils/database.ts(138,4): error TS1434: Unexpected keyword or identifier.
+src/utils/database.ts(138,19): error TS1005: '(' expected.
+src/utils/database.ts(138,25): error TS1005: ';' expected.
+src/utils/database.ts(139,1): error TS1005: ';' expected.
